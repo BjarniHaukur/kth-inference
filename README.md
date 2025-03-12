@@ -1,93 +1,41 @@
-# Simple CLI Chat Interface for QwQ-32B
+# Simple CLI Chat Interface
 
-A minimal command-line chat interface for interacting with the QwQ-32B model using vLLM.
-
-## Requirements
-
-- Python 3.8+
-- All other dependencies will be automatically installed by the start script
+A minimal command-line chat interface for interacting with LLMs using vLLM.
 
 ## Quick Start
 
-### Step 1: Start the vLLM Server
-
-1. Make the start script executable:
+1. Start the vLLM server:
 ```bash
-chmod +x start.sh
+sh serve.sh
 ```
 
-2. Run the start script to launch the vLLM server:
+2. In a separate terminal, start the chat interface:
 ```bash
-# Use default model (Qwen/QwQ-32B-AWQ)
-./start.sh
-
-# Or specify a different model from Hugging Face
-./start.sh mistralai/Mistral-7B-Instruct-v0.2
+uv run chat.py
 ```
 
-This will:
-- Install uv package manager if not present
-- Install required packages (requests, rich) if not present
-- Start the vLLM server with the specified model
-- The server will run in the foreground (press Ctrl+C to stop)
+## Configuration
 
-### Step 2: Start the Chat Interface
-
-In a separate terminal, run the chat interface:
+You can customize the chat interface with these parameters:
 
 ```bash
-# Make the chat script executable if needed
-chmod +x chat.py
+# Use a different model
+uv run chat.py --model mistralai/Mistral-7B-Instruct-v0.2
 
-# Run with default settings
-./chat.py
-
-# Or specify a different model
-./chat.py --model mistralai/Mistral-7B-Instruct-v0.2
-
-# Or specify a custom system prompt
-./chat.py --system "You are a helpful AI assistant that specializes in Python programming."
-
-# Specify the model's context length (if different from default 32768)
-./chat.py --context-length 16384
+# Set a custom system prompt
+uv run chat.py --system "You are a Python programming expert"
 ```
 
-The chat interface will:
-- Check if the vLLM server is running
-- Display available models
-- Start a chat session with the specified model
+## Performance Notes
 
-## Manual Usage
+For Qwen/QwQ-32B, these are the observed generation speeds:
 
-If you want more control, you can run the components with additional options:
+- AWQ: ~38 tokens/s
+- AWQ-Marlin: ~76.8 tokens/s (recommended)
 
-1. Start the vLLM server with custom parameters:
-```bash
-python -m vllm.entrypoints.openai.api_server \
-    --host 0.0.0.0 \
-    --port 8000 \
-    --dtype half \
-    --quantization awq \
-    --max-model-len 32768 \
-    --model Qwen/QwQ-32B-AWQ  # or your preferred model
-```
+## Chat Commands
 
-2. Start the chat interface with custom parameters:
-```bash
-python chat.py --api http://localhost:8000/v1/chat/completions --model Qwen/QwQ-32B-AWQ
-```
-
-## Features
-
-- Beautiful command-line interface using the Rich library
-- Elegant status bar showing real-time token generation speed
-- Distraction-free chat experience with clean UI
-- Streaming responses for a more interactive experience
-- Conversation history maintained during the session
-- Automatic detection of available models
-- Smart token management that maximizes response length
-- Optimized inference with awq_marlin quantization
-- Helpful chat commands:
-  - `clear` or `reset`: Clear conversation history
-  - `help` or `?`: Show available commands
-  - `exit` or `quit`: End the chat session
+- `help` or `?`: Show available commands
+- `clear` or `reset`: Clear conversation history
+- `exit` or `quit`: End the chat session
+- `scroll up/down`: Navigate through message history

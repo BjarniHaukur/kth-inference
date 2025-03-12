@@ -12,23 +12,16 @@ import argparse
 import shutil
 from datetime import datetime
 
-from rich.console import Console, Group
+from rich import box
+from rich.box import ROUNDED
 from rich.live import Live
 from rich.text import Text
 from rich.panel import Panel
-from rich.align import Align
 from rich.layout import Layout
 from rich.prompt import Prompt
-from rich.box import ROUNDED, HEAVY
+from rich.console import Console, Group
 from rich.progress import Progress, SpinnerColumn, TextColumn
-from rich.style import Style
-from rich.syntax import Syntax
-from rich.table import Table
-from rich.markdown import Markdown
-from rich.console import RenderableType
-from rich import box
-from rich.padding import Padding
-from rich.columns import Columns
+
 
 # Create console
 console = Console()
@@ -141,42 +134,42 @@ class Message:
         if self.role == "system":
             return Panel(
                 self.content,
-                title="[bold blue]System[/bold blue]",
+                title="[blue]System[/blue]",
                 title_align="left",
                 border_style="blue",
-                padding=(1, 2),
+                padding=(0, 1),  # Reduced padding
                 width=width,
-                box=box.ROUNDED
+                box=box.SIMPLE  # Simpler box style
             )
         elif self.role == "user":
             return Panel(
                 self.content,
-                title="[bold blue]You[/bold blue]",
+                title="[blue]You[/blue]",
                 title_align="left",
                 border_style="blue",
-                padding=(1, 2),
+                padding=(0, 1),  # Reduced padding
                 width=width,
-                box=box.ROUNDED
+                box=box.SIMPLE  # Simpler box style
             )
         elif self.role == "assistant":
             return Panel(
                 self.content,
-                title="[bold green]Assistant[/bold green]",
+                title="[green]Assistant[/green]",
                 title_align="left",
                 border_style="green",
-                padding=(1, 2),
+                padding=(0, 1),  # Reduced padding
                 width=width,
-                box=box.ROUNDED
+                box=box.SIMPLE  # Simpler box style
             )
         else:
             return Panel(
                 self.content,
-                title=f"[bold yellow]{self.role.capitalize()}[/bold yellow]",
+                title=f"[yellow]{self.role.capitalize()}[/yellow]",
                 title_align="left",
                 border_style="yellow",
-                padding=(1, 2),
+                padding=(0, 1),  # Reduced padding
                 width=width,
-                box=box.ROUNDED
+                box=box.SIMPLE  # Simpler box style
             )
 
 class StatsBar:
@@ -209,24 +202,22 @@ class StatsBar:
             # More prominent display during generation
             speed_style = "bold green" if self.tokens_per_second > 15 else "bold yellow"
             
-            stats_table = Table(show_header=False, box=None, padding=0, expand=True)
-            stats_table.add_column("Status", style="bold")
-            stats_table.add_column("Tokens", style="cyan")
-            stats_table.add_column("Speed", style=speed_style)
-            stats_table.add_column("Time", style="dim")
-            
-            stats_table.add_row(
-                "⚡ GENERATING", 
-                f"{self.token_count} tokens", 
-                f"{self.tokens_per_second} tokens/s",
-                f"{self.total_time:.1f}s"
-            )
+            # Create a more compact stats display
+            stats = [
+                Text("⚡", style="bold"),
+                Text(f" {self.tokens_per_second} tok/s", style=speed_style),
+                Text(" | ", style="dim"),
+                Text(f"{self.token_count} tokens", style="cyan"),
+                Text(" | ", style="dim"),
+                Text(f"{self.total_time:.1f}s", style="dim")
+            ]
             
             return Panel(
-                stats_table,
+                Group(*stats),
                 border_style="green",
                 padding=(0, 1),
-                title="Generation Stats",
+                box=box.SIMPLE,  # Simpler box style
+                title="[bold green]Generating[/bold green]",
                 title_align="left"
             )
         else:
@@ -234,17 +225,17 @@ class StatsBar:
             return Panel(
                 Text(self.status, style="cyan"),
                 border_style="cyan",
-                padding=(0, 1)
+                padding=(0, 1),
+                box=box.SIMPLE  # Simpler box style
             )
 
 class ChatInterface:
     """Enhanced chat interface with scrollable conversation history and prominent tokens/s display."""
     
-    def __init__(self, api_url, model_name, system_prompt=None, max_context_length=32768):
+    def __init__(self, api_url, model_name, system_prompt=None):
         self.api_url = api_url
         self.model_name = model_name
         self.system_prompt = system_prompt
-        self.max_context_length = max_context_length
         self.messages = []
         self.visible_messages = []
         self.scroll_position = 0
@@ -324,7 +315,7 @@ class ChatInterface:
         tokens_used = self.estimate_tokens_in_messages()
         
         # Calculate available tokens (leave a small buffer)
-        available_tokens = max(1, self.max_context_length - tokens_used - 50)
+        available_tokens = max(1, 32768 - tokens_used - 50)
         
         return available_tokens
     
@@ -551,8 +542,9 @@ class ChatInterface:
                                 self.stats.tokens_per_second = int(self.stats.token_count / elapsed_time)
                                 self.stats.total_time = elapsed_time
                                 
-                                # Update the display every 3 tokens to reduce flicker
-                                if self.stats.token_count % 3 == 0:
+                                # Update the display more frequently and ensure auto-scroll
+                                if self.stats.token_count % 2 == 0:  # Update every 2 tokens instead of 3
+                                    self.scroll_to_bottom()  # Force scroll to bottom
                                     self.update_stats_bar(layout)
                                     self.update_chat_area(layout)
                                     live.refresh()
@@ -570,7 +562,8 @@ class ChatInterface:
                 status=f"Generated {self.stats.token_count} tokens in {self.stats.total_time:.1f}s ({self.stats.tokens_per_second} tokens/s)"
             )
             
-            # Final display update
+            # Final display update with forced scroll
+            self.scroll_to_bottom()
             self.update_stats_bar(layout)
             self.update_chat_area(layout)
             live.refresh()
@@ -659,14 +652,12 @@ def main():
     parser.add_argument("--system", type=str, 
                         default="You are a helpful, respectful and honest assistant. Always answer as helpfully as possible.",
                         help="System prompt to set the behavior of the assistant")
-    parser.add_argument("--context-length", type=int, default=32768,
-                        help="Maximum context length of the model (default: 32768)")
     
     args = parser.parse_args()
     
     try:
         # Create and run the chat interface
-        chat_interface = ChatInterface(args.api, args.model, args.system, args.context_length)
+        chat_interface = ChatInterface(args.api, args.model, args.system)
         chat_interface.run()
     except KeyboardInterrupt:
         console.print(f"\n\n[yellow]Chat session ended by user.[/yellow]\n")
