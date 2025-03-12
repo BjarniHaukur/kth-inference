@@ -716,10 +716,29 @@ class ChatInterface:
                 
                 # Get user input
                 console.print()  # Add spacing
-                console.print("[bold blue]Your message:[/bold blue]")
+                console.print("[bold blue]Your message (paste multiline text and press Enter when done):[/bold blue]")
+                
+                # Create a better way to handle multiline input
                 try:
-                    # Get user input
-                    user_input = Prompt.ask(" ")
+                    # Use Bash to get input (supports multiline pasting)
+                    lines = []
+                    print(" ", end="", flush=True)  # Show a prompt
+                    
+                    while True:
+                        try:
+                            line = input()
+                            if line.strip() == "<<EOF>>":  # Special marker to end input
+                                break
+                            lines.append(line)
+                        except EOFError:  # Ctrl+D
+                            break
+                    
+                    user_input = "\n".join(lines)
+                    
+                    # If no input and we got EOF, treat as exit
+                    if not user_input and len(lines) == 0:
+                        raise KeyboardInterrupt
+                        
                 except KeyboardInterrupt:
                     console.print("[yellow]Chat session ended.[/yellow]")
                     return
