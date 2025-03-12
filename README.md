@@ -48,8 +48,8 @@ chmod +x chat.py
 # Or specify a custom system prompt
 ./chat.py --system "You are a helpful AI assistant that specializes in Python programming."
 
-# Control the maximum number of tokens to generate
-./chat.py --max-tokens 1024
+# Specify the model's context length (if different from default 32768)
+./chat.py --context-length 16384
 ```
 
 The chat interface will:
@@ -85,6 +85,7 @@ python chat.py --api http://localhost:8000/v1/chat/completions --model Qwen/QwQ-
 - Streaming responses for a more interactive experience
 - Conversation history maintained during the session
 - Automatic detection of available models
+- Smart token management that maximizes response length
 - Helpful chat commands:
   - `clear` or `reset`: Clear conversation history
   - `help` or `?`: Show available commands

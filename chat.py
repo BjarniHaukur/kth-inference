@@ -113,11 +113,11 @@ def wait_for_server(api_base_url, max_retries=10, retry_delay=2):
 class ChatInterface:
     """Chat interface with a status bar for tokens/s display."""
     
-    def __init__(self, api_url, model_name, system_prompt=None, max_tokens=32768):
+    def __init__(self, api_url, model_name, system_prompt=None, max_context_length=32768):
         self.api_url = api_url
         self.model_name = model_name
         self.system_prompt = system_prompt
-        self.max_tokens = max_tokens
+        self.max_context_length = max_context_length
         self.conversation = []
         self.token_count = 0
         self.tokens_per_second = 0
@@ -131,6 +131,31 @@ class ChatInterface:
                 "role": "system",
                 "content": system_prompt
             })
+    
+    def estimate_tokens_in_messages(self):
+        """
+        Estimate the number of tokens in the current conversation.
+        This is a rough estimate - about 4 characters per token for English text.
+        """
+        total_chars = 0
+        for message in self.conversation:
+            # Add characters in the message content
+            total_chars += len(message.get("content", ""))
+            # Add some overhead for the message format
+            total_chars += 10  # Rough estimate for role and formatting
+        
+        # Estimate tokens (4 chars per token is a rough approximation)
+        return total_chars // 4 + 10  # Add some buffer
+    
+    def calculate_max_tokens(self):
+        """Calculate the maximum tokens available for completion based on context length."""
+        # Estimate tokens used in the conversation so far
+        tokens_used = self.estimate_tokens_in_messages()
+        
+        # Calculate available tokens (leave a small buffer)
+        available_tokens = max(1, self.max_context_length - tokens_used - 50)
+        
+        return available_tokens
     
     def create_layout(self):
         """Create the layout for the chat interface."""
@@ -261,11 +286,16 @@ class ChatInterface:
                     headers = {
                         "Content-Type": "application/json"
                     }
+                    
+                    # Calculate maximum available tokens for completion
+                    available_tokens = self.calculate_max_tokens()
+                    console.print(f"[dim](Using up to {available_tokens} tokens for response)[/dim]", end=" ")
+                    
                     data = {
                         "model": self.model_name,
                         "messages": self.conversation,
                         "stream": True,
-                        "max_tokens": self.max_tokens
+                        "max_tokens": available_tokens
                     }
                     
                     # Make the API request
@@ -341,14 +371,14 @@ def main():
     parser.add_argument("--system", type=str, 
                         default="You are a helpful, respectful and honest assistant. Always answer as helpfully as possible.",
                         help="System prompt to set the behavior of the assistant")
-    parser.add_argument("--max-tokens", type=int, default=32768,
-                        help="Maximum number of tokens to generate (default: 32768)")
+    parser.add_argument("--context-length", type=int, default=32768,
+                        help="Maximum context length of the model (default: 32768)")
     
     args = parser.parse_args()
     
     try:
         # Create and run the chat interface
-        chat_interface = ChatInterface(args.api, args.model, args.system, args.max_tokens)
+        chat_interface = ChatInterface(args.api, args.model, args.system, args.context_length)
         chat_interface.run()
     except KeyboardInterrupt:
         console.print(f"\n\n[yellow]Chat session ended by user.[/yellow]\n")
