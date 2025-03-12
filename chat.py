@@ -443,7 +443,7 @@ class ChatInterface:
             total_chars += 10  # Rough estimate for role and formatting
         
         # Estimate tokens (4 chars per token is a rough approximation)
-        return total_chars // 4 + 10  # Add some buffer
+        return (total_chars // 4) * 1.1  # To be safe
     
     def calculate_max_tokens(self):
         """Calculate the maximum tokens available for completion based on context length."""
