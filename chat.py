@@ -21,6 +21,8 @@ from rich.layout import Layout
 from rich.prompt import PromptBase, Prompt
 from rich.console import Console, Group
 from rich.progress import Progress, SpinnerColumn, TextColumn
+from prompt_toolkit import PromptSession
+from prompt_toolkit.key_binding import KeyBindings
 
 
 # Create console
@@ -40,7 +42,8 @@ def print_header(model_name):
         border_style="cyan"
     ))
     console.print(
-        "[dim]- Type your message and press Enter to send\n"
+        "[dim]- Type your message and press [bold]Ctrl+Enter[/bold] or [bold]Ctrl+D[/bold] to send\n"
+        "- Enter adds a new line for multiline messages\n"
         "- Type 'exit' to quit, 'clear' to reset conversation\n"
         "- Type 'help' for more commands[/dim]"
     )
@@ -259,16 +262,45 @@ class StatsBar:
                 box=box.SIMPLE
             )
 
-class MultilinePrompt(PromptBase):
-    """Legacy prompt class kept for compatibility."""
+class MultilinePrompt:
+    """A prompt that supports multi-line input with Ctrl+Enter to submit."""
     
     def __init__(self):
-        super().__init__()
+        self.session = PromptSession()
+        self.kb = KeyBindings()
+        
+        # Enter inserts a newline
+        @self.kb.add('enter')
+        def _(event):
+            event.current_buffer.insert_text('\n')
+        
+        # Ctrl+Enter submits
+        @self.kb.add('c-enter')
+        def _(event):
+            event.current_buffer.validate_and_handle()
+            
+        # Add Ctrl+D as a fallback for terminals that don't support Ctrl+Enter
+        @self.kb.add('c-d')
+        def _(event):
+            # Only validate if buffer has text, otherwise let it pass through as EOF
+            if event.current_buffer.text:
+                event.current_buffer.validate_and_handle()
+            else:
+                # Pass the EOF through
+                event.current_buffer.validate_and_handle()
     
     def get_input(self) -> str:
         """Get input from the user."""
-        # This method is no longer used - we use Rich's Prompt directly instead
-        return Prompt.ask("[bold blue]You[/bold blue]")
+        # Leave a clean space for input
+        print()
+        
+        text = self.session.prompt(
+            ">>> ",  # Simple prompt
+            multiline=True,
+            key_bindings=self.kb,
+            prompt_continuation=lambda width, line_number, is_soft_wrap: '... '
+        )
+        return text.rstrip()
 
 class ChatInterface:
     """Enhanced chat interface with scrollable conversation history and prominent tokens/s display."""
@@ -715,30 +747,11 @@ class ChatInterface:
                 live.stop()
                 
                 # Get user input
-                console.print()  # Add spacing
-                console.print("[bold blue]Your message (paste multiline text and press Enter when done):[/bold blue]")
+                console.print("[bold blue]Your message (Ctrl+Enter or Ctrl+D to send):[/bold blue]")
                 
-                # Create a better way to handle multiline input
                 try:
-                    # Use Bash to get input (supports multiline pasting)
-                    lines = []
-                    print(" ", end="", flush=True)  # Show a prompt
-                    
-                    while True:
-                        try:
-                            line = input()
-                            if line.strip() == "<<EOF>>":  # Special marker to end input
-                                break
-                            lines.append(line)
-                        except EOFError:  # Ctrl+D
-                            break
-                    
-                    user_input = "\n".join(lines)
-                    
-                    # If no input and we got EOF, treat as exit
-                    if not user_input and len(lines) == 0:
-                        raise KeyboardInterrupt
-                        
+                    # Use our improved MultilinePrompt
+                    user_input = self.prompt.get_input()
                 except KeyboardInterrupt:
                     console.print("[yellow]Chat session ended.[/yellow]")
                     return
