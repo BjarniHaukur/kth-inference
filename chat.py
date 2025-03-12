@@ -30,11 +30,16 @@ def print_header(model_name):
     console.print()
     console.print(Panel(
         f"[bold cyan]{display_name} Chat Interface[/bold cyan]",
-        subtitle="[dim]Type 'exit' or 'quit' to end the conversation[/dim]",
+        subtitle="[dim]Type 'help' for available commands[/dim]",
         box=ROUNDED,
         expand=False,
         border_style="cyan"
     ))
+    console.print(
+        "[dim]- Type your message and press Enter to chat\n"
+        "- Type 'exit' to quit, 'clear' to reset conversation\n"
+        "- Type 'help' for more commands[/dim]"
+    )
     console.print()
 
 def get_available_models(api_base_url):
@@ -108,7 +113,7 @@ def wait_for_server(api_base_url, max_retries=10, retry_delay=2):
 class ChatInterface:
     """Chat interface with a status bar for tokens/s display."""
     
-    def __init__(self, api_url, model_name, system_prompt=None, max_tokens=4096):
+    def __init__(self, api_url, model_name, system_prompt=None, max_tokens=32768):
         self.api_url = api_url
         self.model_name = model_name
         self.system_prompt = system_prompt
@@ -137,9 +142,14 @@ class ChatInterface:
             Layout(name="status_bar", size=1)
         )
         
-        # Initialize the status bar
+        # Initialize the status bar with a more visible style
         layout["status_bar"].update(
-            Text("Ready", style="dim")
+            Panel(
+                Align.right(Text("Ready", style="cyan")),
+                border_style="cyan",
+                padding=(0, 1),
+                height=1
+            )
         )
         
         return layout
@@ -150,14 +160,23 @@ class ChatInterface:
             elapsed_time = max(0.1, time.time() - self.start_time)
             self.tokens_per_second = int(self.token_count / elapsed_time)
             status_text = f"Generating: {self.token_count} tokens | {self.tokens_per_second} tokens/s"
+            style = "green"
         elif message:
             status_text = message
+            style = "yellow"
         else:
             status_text = "Ready"
+            style = "cyan"
         
-        # Right-align the status text
-        status = Text(status_text, style="dim")
-        layout["status_bar"].update(Align.right(status))
+        # Update the status bar with a panel for better visibility
+        layout["status_bar"].update(
+            Panel(
+                Align.right(Text(status_text, style=style)),
+                border_style="cyan",
+                padding=(0, 1),
+                height=1
+            )
+        )
     
     def run(self):
         """Run the chat interface."""
@@ -183,23 +202,39 @@ class ChatInterface:
         layout = self.create_layout()
         
         # Main chat loop
-        with Live(layout, refresh_per_second=10, console=console, screen=True) as live:
+        with Live(layout, refresh_per_second=10, console=console, auto_refresh=False) as live:
             while True:
                 # Update status bar
                 self.update_status_bar(layout)
                 live.refresh()
                 
-                # Get user input (outside of Live context to allow input)
-                live.stop()
+                # Get user input (without stopping the live display)
                 user_input = Prompt.ask("[bold blue]You[/bold blue]")
-                live.start()
                 
-                # Check if user wants to exit
+                # Check for special commands
                 if user_input.lower() in ["exit", "quit"]:
                     self.update_status_bar(layout, "Goodbye!")
                     live.refresh()
                     time.sleep(1)  # Show goodbye message briefly
                     break
+                elif user_input.lower() in ["clear", "reset"]:
+                    # Clear conversation history except system prompt
+                    if self.system_prompt:
+                        self.conversation = [{"role": "system", "content": self.system_prompt}]
+                    else:
+                        self.conversation = []
+                    console.print("[yellow]Conversation history cleared.[/yellow]\n")
+                    continue
+                elif user_input.lower() in ["help", "?"]:
+                    console.print(Panel(
+                        "[cyan]Available commands:[/cyan]\n"
+                        "- [bold]exit[/bold] or [bold]quit[/bold]: Exit the chat\n"
+                        "- [bold]clear[/bold] or [bold]reset[/bold]: Clear conversation history\n"
+                        "- [bold]help[/bold] or [bold]?[/bold]: Show this help message",
+                        title="Help",
+                        border_style="cyan"
+                    ))
+                    continue
                 
                 # Add user message to conversation
                 self.conversation.append({
@@ -219,10 +254,8 @@ class ChatInterface:
                     self.update_status_bar(layout)
                     live.refresh()
                     
-                    # Temporarily stop the live display to print the assistant prompt
-                    live.stop()
+                    # Print the assistant prompt
                     console.print("[bold green]Assistant:[/bold green] ", end="")
-                    live.start()
                     
                     # Prepare the API request
                     headers = {
@@ -244,9 +277,7 @@ class ChatInterface:
                     )
                     
                     if response.status_code != 200:
-                        live.stop()
                         console.print(f"[bold red]Error: API request failed with status {response.status_code}[/bold red]")
-                        live.start()
                         continue
                     
                     # Process the streaming response
@@ -263,22 +294,20 @@ class ChatInterface:
                                             self.full_response += content
                                             
                                             # Print the new content
-                                            live.stop()
                                             console.print(content, end="", highlight=False)
-                                            live.start()
                                             
                                             # Update token count
                                             self.token_count += 1
                                             
-                                            # Update status bar
-                                            self.update_status_bar(layout)
+                                            # Update status bar every 5 tokens to reduce flicker
+                                            if self.token_count % 5 == 0:
+                                                self.update_status_bar(layout)
+                                                live.refresh()
                                 except json.JSONDecodeError:
                                     pass
                     
                     # Add a newline after the response
-                    live.stop()
                     console.print()
-                    live.start()
                     
                     # Add assistant message to conversation
                     self.conversation.append({
@@ -292,18 +321,12 @@ class ChatInterface:
                     self.tokens_per_second = int(self.token_count / elapsed_time) if elapsed_time > 0 else 0
                     
                     # Show final generation stats
-                    live.stop()
                     console.print(f"[dim]Generated {self.token_count} tokens in {elapsed_time:.2f}s ({self.tokens_per_second} tokens/s)[/dim]\n")
-                    live.start()
                     
                 except requests.exceptions.ConnectionError:
-                    live.stop()
                     console.print("\n[bold red]Error: Could not connect to the API server. Make sure it's running.[/bold red]\n")
-                    live.start()
                 except Exception as e:
-                    live.stop()
                     console.print(f"\n[bold red]Error: {str(e)}[/bold red]\n")
-                    live.start()
 
 def main():
     """Main function."""
@@ -318,8 +341,8 @@ def main():
     parser.add_argument("--system", type=str, 
                         default="You are a helpful, respectful and honest assistant. Always answer as helpfully as possible.",
                         help="System prompt to set the behavior of the assistant")
-    parser.add_argument("--max-tokens", type=int, default=4096,
-                        help="Maximum number of tokens to generate (default: 4096)")
+    parser.add_argument("--max-tokens", type=int, default=32768,
+                        help="Maximum number of tokens to generate (default: 32768)")
     
     args = parser.parse_args()
     
