@@ -42,8 +42,9 @@ def print_header(model_name):
         border_style="cyan"
     ))
     console.print(
-        "[dim]- Type your message and press [bold]Ctrl+Enter[/bold] or [bold]Ctrl+D[/bold] to send\n"
-        "- Enter adds a new line for multiline messages\n"
+        "[dim]- Type your message and press [bold]Ctrl+J[/bold] to send\n"
+        "- Or press [bold]Esc[/bold] followed by [bold]Enter[/bold] to send\n"
+        "- Enter key adds a new line for multiline messages\n"
         "- Type 'exit' to quit, 'clear' to reset conversation\n"
         "- Type 'help' for more commands[/dim]"
     )
@@ -263,7 +264,7 @@ class StatsBar:
             )
 
 class MultilinePrompt:
-    """A prompt that supports multi-line input with Ctrl+Enter to submit."""
+    """A prompt that supports multi-line input with Ctrl+J to submit (for compatibility)."""
     
     def __init__(self):
         self.session = PromptSession()
@@ -274,20 +275,15 @@ class MultilinePrompt:
         def _(event):
             event.current_buffer.insert_text('\n')
         
-        # Ctrl+Enter submits
-        @self.kb.add('c-enter')
+        # Ctrl+J submits (this is available across all terminals)
+        @self.kb.add('c-j')
         def _(event):
             event.current_buffer.validate_and_handle()
-            
-        # Add Ctrl+D as a fallback for terminals that don't support Ctrl+Enter
-        @self.kb.add('c-d')
+        
+        # Esc followed by Enter as another option to submit
+        @self.kb.add('escape', 'enter')
         def _(event):
-            # Only validate if buffer has text, otherwise let it pass through as EOF
-            if event.current_buffer.text:
-                event.current_buffer.validate_and_handle()
-            else:
-                # Pass the EOF through
-                event.current_buffer.validate_and_handle()
+            event.current_buffer.validate_and_handle()
     
     def get_input(self) -> str:
         """Get input from the user."""
@@ -747,7 +743,7 @@ class ChatInterface:
                 live.stop()
                 
                 # Get user input
-                console.print("[bold blue]Your message (Ctrl+Enter or Ctrl+D to send):[/bold blue]")
+                console.print("[bold blue]Your message (Ctrl+J or Esc+Enter to send):[/bold blue]")
                 
                 try:
                     # Use our improved MultilinePrompt
@@ -755,6 +751,15 @@ class ChatInterface:
                 except KeyboardInterrupt:
                     console.print("[yellow]Chat session ended.[/yellow]")
                     return
+                except Exception as e:
+                    # Fallback to basic input if prompt_toolkit fails
+                    console.print(f"[yellow]Advanced input failed: {str(e)}[/yellow]")
+                    console.print("[yellow]Falling back to basic input. Type your message and press Enter:[/yellow]")
+                    try:
+                        user_input = input(" ")
+                    except KeyboardInterrupt:
+                        console.print("[yellow]Chat session ended.[/yellow]")
+                        return
                 
                 # Restart the live display
                 live.start()
