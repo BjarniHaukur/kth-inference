@@ -368,40 +368,45 @@ class ChatInterface:
         return estimated_height
     
     def calculate_visible_messages(self):
-        """Calculate which messages should be visible based on their heights."""
+        """Calculate which messages should be visible based on scroll position."""
         terminal_height = self.terminal_size.lines
-        # Space available for messages (subtract space for stats bar, prompt, etc.)
-        available_height = terminal_height - 10
+        # Space available for messages (reserve space for stats bar and input area)
+        available_height = max(10, terminal_height - 8)
         
         # Get terminal width for message formatting
-        width = max(60, self.terminal_size.columns - 10)
+        width = max(60, self.terminal_size.columns - 4)
         
-        # Start from the bottom of the list if user hasn't scrolled
+        # If user hasn't manually scrolled, show the most recent messages
         if not self.user_scrolled:
-            # Work backwards from the end of the messages
             visible = []
             current_height = 0
             
             for message in reversed(self.messages):
                 msg_height = self.estimate_message_height(message, width)
                 if current_height + msg_height <= available_height:
-                    visible.insert(0, message)
+                    visible.insert(0, message)  # Insert at beginning to maintain order
                     current_height += msg_height
                 else:
+                    # If we can't fit all messages, prioritize showing the latest
+                    if not visible:
+                        visible.insert(0, message)  # Always show at least one message
                     break
             
             return visible
         else:
-            # Start from scroll_position
+            # User has manually scrolled - respect scroll position
             visible = []
             current_height = 0
             
+            # Start from the scroll position
             for i in range(self.scroll_position, len(self.messages)):
                 msg_height = self.estimate_message_height(self.messages[i], width)
                 if current_height + msg_height <= available_height:
                     visible.append(self.messages[i])
                     current_height += msg_height
                 else:
+                    if not visible:
+                        visible.append(self.messages[i])  # Always show at least one message
                     break
             
             return visible
@@ -409,7 +414,8 @@ class ChatInterface:
     def scroll_to_bottom(self):
         """Scroll to the latest message."""
         self.user_scrolled = False
-        self.scroll_position = len(self.messages)
+        if self.messages:
+            self.scroll_position = 0  # Reset position - we'll show latest messages automatically
     
     def scroll_up(self):
         """Scroll conversation up."""
@@ -427,7 +433,7 @@ class ChatInterface:
             self.user_scrolled = False
     
     def get_visible_messages(self):
-        """Get the currently visible messages based on scroll position and message heights."""
+        """Get the currently visible messages based on scroll position."""
         return self.calculate_visible_messages()
     
     def estimate_tokens_in_messages(self):
@@ -459,11 +465,11 @@ class ChatInterface:
         """Create the layout for the chat interface."""
         layout = Layout()
         
-        # Create the main layout with chat area, stats bar, and input area
+        # Create the main layout - more space for chat, fixed space for stats and input
         layout.split_column(
-            Layout(name="chat_area", ratio=8),
+            Layout(name="chat_area", ratio=80),
             Layout(name="stats_bar", size=3),
-            Layout(name="input_area", size=1)
+            Layout(name="input_area", size=3)  # Increased size for input area
         )
         
         # Initialize the chat area with an empty panel
@@ -473,7 +479,7 @@ class ChatInterface:
                 title="Conversation",
                 border_style="cyan",
                 box=ROUNDED,
-                padding=(1, 2)
+                padding=(1, 1)
             )
         )
         
@@ -484,7 +490,7 @@ class ChatInterface:
         layout["input_area"].update(
             Panel(
                 Text("Type your message..."),
-                title="Input",
+                title="Input (Ctrl+J to send)",
                 border_style="blue",
                 box=ROUNDED,
                 padding=(0, 1)
@@ -505,13 +511,13 @@ class ChatInterface:
                     title="Conversation",
                     border_style="cyan",
                     box=ROUNDED,
-                    padding=(1, 2)
+                    padding=(1, 1)
                 )
             )
             return
         
         # Get the width of the terminal for formatting
-        width = max(60, self.terminal_size.columns - 10)
+        width = max(60, self.terminal_size.columns - 4)
         
         # Create panels for each message
         message_panels = []
@@ -520,10 +526,14 @@ class ChatInterface:
         
         # Add scroll indicators if needed
         scroll_info = ""
-        if self.scroll_position > 0:
+        if self.scroll_position > 0 or (self.user_scrolled and visible_messages and visible_messages[0] != self.messages[0]):
             scroll_info += "[bold yellow]↑ More messages above[/bold yellow]\n"
         
-        if visible_messages and visible_messages[-1] != self.messages[-1]:
+        # Check if there are more messages below that aren't visible
+        last_visible = visible_messages[-1] if visible_messages else None
+        last_message = self.messages[-1] if self.messages else None
+        
+        if last_visible and last_message and last_visible != last_message:
             if scroll_info:
                 scroll_info += "\n"
             scroll_info += "[bold yellow]↓ More messages below[/bold yellow]"
@@ -552,12 +562,12 @@ class ChatInterface:
         """Update the stats bar with current stats."""
         layout["stats_bar"].update(self.stats.to_renderable())
     
-    def update_input_area(self, layout, text="Type your message..."):
+    def update_input_area(self, layout, text="Type your message... (Ctrl+J to send)"):
         """Update the input area with current text."""
         layout["input_area"].update(
             Panel(
                 Text(text),
-                title="Input",
+                title="Input (Ctrl+J to send)",
                 border_style="blue",
                 box=ROUNDED,
                 padding=(0, 1)
@@ -678,9 +688,8 @@ class ChatInterface:
                                 self.stats.total_time = elapsed_time
                                 
                                 # Update the display more frequently
-                                if self.stats.token_count % 2 == 0:  # Update every 2 tokens instead of 3
-                                    # Reset user_scrolled during generation to ensure we see new content
-                                    self.user_scrolled = False
+                                if self.stats.token_count % 1 == 0:  # Update every token for smoother scrolling
+                                    # During generation, always show the latest content
                                     self.scroll_to_bottom()
                                     self.update_stats_bar(layout)
                                     self.update_chat_area(layout)
@@ -699,8 +708,7 @@ class ChatInterface:
                 status=f"Generated {self.stats.token_count} tokens in {self.stats.total_time:.1f}s ({self.stats.tokens_per_second} tokens/s)"
             )
             
-            # Final display update with forced scroll
-            self.user_scrolled = False  # Reset user_scrolled flag after generation
+            # Force a final update to ensure message is fully visible
             self.scroll_to_bottom()
             self.update_stats_bar(layout)
             self.update_chat_area(layout)
@@ -749,7 +757,7 @@ class ChatInterface:
         # Main chat loop
         with Live(layout, refresh_per_second=10, console=console, auto_refresh=False) as live:
             while True:
-                # Update the display
+                # Update terminal size and refresh the display
                 self.terminal_size = shutil.get_terminal_size()
                 self.update_chat_area(layout)
                 self.update_stats_bar(layout)
