@@ -6,7 +6,7 @@ A minimal command-line chat interface for interacting with LLMs using vLLM.
 
 1. Start the vLLM server:
 ```bash
-sh serve.sh
+sh start.sh
 ```
 
 2. In a separate terminal, start the chat interface:
@@ -25,6 +25,14 @@ uv run chat.py --model mistralai/Mistral-7B-Instruct-v0.2
 # Set a custom system prompt
 uv run chat.py --system "You are a Python programming expert"
 ```
+
+## Features
+
+- **Beautiful tokens/s display** with visual indicators and progress bar
+- Dynamic speed indicators (🚀 for very fast, ⚡ for fast, etc.)
+- Multi-line input support with Ctrl+Enter to send
+- Scrollable conversation history
+- Real-time streaming responses
 
 ## Usage
 

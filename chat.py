@@ -43,7 +43,8 @@ def print_header(model_name):
         border_style="cyan"
     ))
     console.print(
-        "[dim]- Type your message and press Enter to chat\n"
+        "[dim]- Type your message and press Enter for new lines\n"
+        "- Press [bold]Ctrl+Enter[/bold] to send your message\n"
         "- Type 'exit' to quit, 'clear' to reset conversation\n"
         "- Type 'help' for more commands[/dim]"
     )
@@ -199,28 +200,58 @@ class StatsBar:
         if status is not None:
             self.status = status
     
+    def _get_speed_style(self):
+        """Get the appropriate style based on tokens/s speed."""
+        if self.tokens_per_second >= 70:
+            return "bold bright_green", "🚀"  # Rocket for very fast
+        elif self.tokens_per_second >= 40:
+            return "bold green", "⚡"  # Lightning for fast
+        elif self.tokens_per_second >= 20:
+            return "bold yellow", "🔆"  # Sun for medium
+        else:
+            return "bold orange3", "🔸"  # Diamond for slower
+    
     def to_renderable(self):
         """Convert to a Rich renderable for display."""
         if self.is_generating:
-            # More prominent display during generation
-            speed_style = "bold green" if self.tokens_per_second > 15 else "bold yellow"
+            # Get style based on speed
+            speed_style, speed_icon = self._get_speed_style()
             
-            # Create a more compact stats display
+            # Create a more visually appealing tokens/s display
+            tokens_per_second_text = Text(f" {self.tokens_per_second}", style=speed_style)
+            
+            # Add a larger font size effect using Unicode superscript/subscript
+            tokens_per_second_text.append(" tokens/s", style="dim")
+            
+            # Create the main stats display
             stats = [
-                Text("⚡", style="bold"),
-                Text(f" {self.tokens_per_second} tok/s", style=speed_style),
+                Text(speed_icon, style=speed_style),
+                tokens_per_second_text,
                 Text(" | ", style="dim"),
                 Text(f"{self.token_count} tokens", style="cyan"),
                 Text(" | ", style="dim"),
                 Text(f"{self.total_time:.1f}s", style="dim")
             ]
             
+            # Create a progress bar representation of the speed
+            max_speed = 100  # Maximum expected tokens/s
+            speed_percentage = min(100, int((self.tokens_per_second / max_speed) * 100))
+            
+            # Create a visual bar
+            bar_width = 20
+            filled = int((speed_percentage / 100) * bar_width)
+            bar = "█" * filled + "░" * (bar_width - filled)
+            
+            # Create the complete display
             return Panel(
-                Group(*stats),
-                border_style="green",
+                Group(
+                    Group(*stats),
+                    Text(f"{bar} {speed_percentage}%", style=speed_style)
+                ),
+                border_style=speed_style.split()[1] if "bold" in speed_style else speed_style,
                 padding=(0, 1),
-                box=box.SIMPLE,  # Simpler box style
-                title="[bold green]Generating[/bold green]",
+                box=box.SIMPLE,
+                title=f"[{speed_style}]Generating at {self.tokens_per_second} tokens/s[/{speed_style}]",
                 title_align="left"
             )
         else:
@@ -229,7 +260,7 @@ class StatsBar:
                 Text(self.status, style="cyan"),
                 border_style="cyan",
                 padding=(0, 1),
-                box=box.SIMPLE  # Simpler box style
+                box=box.SIMPLE
             )
 
 class MultilinePrompt(PromptBase):
@@ -637,7 +668,7 @@ class ChatInterface:
                 console.print(f"[yellow]Will try to use it anyway, but it might not work.[/yellow]")
         
         print_header(self.model_name)
-        console.print("[dim]Press Ctrl+Enter to send message[/dim]")
+        console.print("[dim italic]Watch the tokens/s display for real-time generation speed![/dim italic]")
         console.print()
         
         # Create the layout
