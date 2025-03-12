@@ -9,4 +9,5 @@ dependencies = [
     "vllm",
     "setuptools",
     "rich>=13.9.4",
+    "prompt-toolkit>=3.0.43",
 ]

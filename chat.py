@@ -18,9 +18,12 @@ from rich.live import Live
 from rich.text import Text
 from rich.panel import Panel
 from rich.layout import Layout
-from rich.prompt import Prompt
+from rich.prompt import PromptBase, Prompt
 from rich.console import Console, Group
 from rich.progress import Progress, SpinnerColumn, TextColumn
+from prompt_toolkit import PromptSession
+from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.keys import Keys
 
 
 # Create console
@@ -229,6 +232,37 @@ class StatsBar:
                 box=box.SIMPLE  # Simpler box style
             )
 
+class MultilinePrompt(PromptBase):
+    """A prompt that supports multi-line input with Ctrl+Enter to submit."""
+    
+    def __init__(self):
+        super().__init__()
+        self.session = PromptSession()
+        self.kb = KeyBindings()
+        
+        @self.kb.add('c-j', 'c-m')  # Enter key
+        def _(event):
+            """Add newline on regular enter."""
+            event.current_buffer.insert_text('\n')
+        
+        @self.kb.add('c-enter')  # Ctrl+Enter
+        def _(event):
+            """Submit on Ctrl+Enter."""
+            event.current_buffer.validate_and_handle()
+    
+    def render_text(self) -> Text:
+        """Render the prompt text."""
+        return Text("[bold blue]You[/bold blue]")
+    
+    def get_input(self) -> str:
+        """Get input from the user."""
+        text = self.session.prompt(
+            self.render_text().plain,
+            key_bindings=self.kb,
+            multiline=True
+        )
+        return text.strip()
+
 class ChatInterface:
     """Enhanced chat interface with scrollable conversation history and prominent tokens/s display."""
     
@@ -244,6 +278,7 @@ class ChatInterface:
         self.total_tokens = 0
         self.total_time = 0
         self.current_response = ""
+        self.prompt = MultilinePrompt()
         
         # Terminal size
         self.terminal_size = shutil.get_terminal_size()
@@ -602,6 +637,8 @@ class ChatInterface:
                 console.print(f"[yellow]Will try to use it anyway, but it might not work.[/yellow]")
         
         print_header(self.model_name)
+        console.print("[dim]Press Ctrl+Enter to send message[/dim]")
+        console.print()
         
         # Create the layout
         layout = self.create_layout()
@@ -616,8 +653,18 @@ class ChatInterface:
                 self.update_input_area(layout)
                 live.refresh()
                 
-                # Get user input
-                user_input = Prompt.ask("[bold blue]You[/bold blue]")
+                try:
+                    # Get user input with multi-line support
+                    user_input = self.prompt.get_input()
+                except KeyboardInterrupt:
+                    self.stats.update(status="Goodbye!")
+                    self.update_stats_bar(layout)
+                    live.refresh()
+                    time.sleep(1)
+                    break
+                
+                if not user_input:
+                    continue
                 
                 # Check for special commands
                 command_result = self.handle_user_command(user_input)

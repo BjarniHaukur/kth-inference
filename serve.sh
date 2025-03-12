@@ -23,8 +23,10 @@ uv run python3 -m vllm.entrypoints.openai.api_server \
     --port 8000 \
     --dtype half \
     --quantization awq_marlin \
+    --enforce-eager \
     --max-model-len 32768 \
     --model $MODEL_NAME
+
 
 # The server runs in the foreground, so the script will block here
 # To stop the server, press Ctrl+C 

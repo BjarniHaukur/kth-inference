@@ -26,6 +26,13 @@ uv run chat.py --model mistralai/Mistral-7B-Instruct-v0.2
 uv run chat.py --system "You are a Python programming expert"
 ```
 
+## Usage
+
+- Type your message and press Enter for new lines
+- Press Ctrl+Enter to send the message
+- Supports pasting multi-line text
+- Use chat commands (see below) for additional functionality
+
 ## Performance Notes
 
 For Qwen/QwQ-32B, these are the observed generation speeds:
