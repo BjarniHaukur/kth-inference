@@ -3,52 +3,30 @@
 Simple CLI chat interface for LLMs using vLLM's OpenAI-compatible API.
 """
 
-import argparse
+import os
 import json
 import time
 import requests
-import sys
-import os
-import shutil
-from datetime import datetime
+import argparse
 
-# ANSI color codes
-COLORS = {
-    "reset": "\033[0m",
-    "bold": "\033[1m",
-    "blue": "\033[94m",
-    "green": "\033[92m",
-    "yellow": "\033[93m",
-    "red": "\033[91m",
-    "cyan": "\033[96m",
-    "magenta": "\033[95m",
-    "gray": "\033[90m",
-}
+from rich.console import Console
+from rich.live import Live
+from rich.text import Text
+from rich.layout import Layout
+from rich.table import Table
+from rich.prompt import Prompt
 
-# ANSI cursor movement codes
-CURSOR = {
-    "up": "\033[A",
-    "down": "\033[B",
-    "right": "\033[C",
-    "left": "\033[D",
-    "save": "\033[s",
-    "restore": "\033[u",
-    "clear_line": "\033[K",
-    "clear_screen": "\033[2J",
-    "home": "\033[H",
-}
 
-def clear_line():
-    """Clear the current line in the terminal."""
-    sys.stdout.write(CURSOR["clear_line"])
-    sys.stdout.flush()
+# Create console
+console = Console()
 
 def print_header(model_name):
     """Print a nice header for the chat interface."""
     # Extract just the model name without the organization
     display_name = model_name.split('/')[-1] if '/' in model_name else model_name
-    print(f"\n{COLORS['bold']}{COLORS['cyan']}=== {display_name} Chat Interface ==={COLORS['reset']}")
-    print(f"{COLORS['gray']}Type 'exit' or 'quit' to end the conversation{COLORS['reset']}\n")
+    
+    console.print(f"\n[bold cyan]=== {display_name} Chat Interface ===[/bold cyan]")
+    console.print("[dim]Type 'exit' or 'quit' to end the conversation[/dim]\n")
 
 def get_available_models(api_base_url):
     """
@@ -72,7 +50,7 @@ def get_available_models(api_base_url):
                 return [model['id'] for model in models_data['data']]
         return None
     except Exception as e:
-        print(f"{COLORS['red']}Error fetching available models: {str(e)}{COLORS['reset']}")
+        console.print(f"[bold red]Error fetching available models: {str(e)}[/bold red]")
         return None
 
 def wait_for_server(api_base_url, max_retries=10, retry_delay=2):
@@ -87,35 +65,45 @@ def wait_for_server(api_base_url, max_retries=10, retry_delay=2):
     Returns:
         True if the server is available, False otherwise
     """
-    print(f"{COLORS['yellow']}Checking if vLLM server is running...{COLORS['reset']}")
+    console.print("[yellow]Checking if vLLM server is running...[/yellow]")
     
-    for i in range(max_retries):
-        try:
-            # Extract the base URL (without the /v1/chat/completions part)
-            base_url = api_base_url.split('/v1/')[0]
-            models_url = f"{base_url}/v1/models"
-            
-            response = requests.get(models_url)
-            if response.status_code == 200:
-                print(f"{COLORS['green']}Server is running!{COLORS['reset']}")
-                return True
-            
-            print(f"{COLORS['yellow']}Waiting for server to start (attempt {i+1}/{max_retries})...{COLORS['reset']}")
-            time.sleep(retry_delay)
-        except requests.exceptions.ConnectionError:
-            print(f"{COLORS['yellow']}Server not ready yet (attempt {i+1}/{max_retries})...{COLORS['reset']}")
-            time.sleep(retry_delay)
+    with console.status("[yellow]Connecting to server...[/yellow]") as status:
+        for i in range(max_retries):
+            try:
+                # Extract the base URL (without the /v1/chat/completions part)
+                base_url = api_base_url.split('/v1/')[0]
+                models_url = f"{base_url}/v1/models"
+                
+                response = requests.get(models_url)
+                if response.status_code == 200:
+                    console.print("[bold green]Server is running![/bold green]")
+                    return True
+                
+                status.update(f"[yellow]Waiting for server to start (attempt {i+1}/{max_retries})...[/yellow]")
+                time.sleep(retry_delay)
+            except requests.exceptions.ConnectionError:
+                status.update(f"[yellow]Server not ready yet (attempt {i+1}/{max_retries})...[/yellow]")
+                time.sleep(retry_delay)
     
-    print(f"{COLORS['red']}Server did not become available after {max_retries} attempts.{COLORS['reset']}")
-    print(f"{COLORS['yellow']}Make sure the vLLM server is running with: ./start.sh{COLORS['reset']}")
+    console.print("[bold red]Server did not become available after {max_retries} attempts.[/bold red]")
+    console.print("[yellow]Make sure the vLLM server is running with: ./start.sh[/yellow]")
     return False
 
-def get_terminal_width():
-    """Get the width of the terminal."""
-    try:
-        return shutil.get_terminal_size().columns
-    except:
-        return 80  # Default width if we can't determine it
+def create_chat_layout():
+    """Create the layout for the chat interface."""
+    layout = Layout()
+    
+    # Create the tokens/s display
+    tokens_table = Table.grid(padding=0)
+    tokens_table.add_row(Text("0 tokens/s", style="dim"))
+    
+    # Create the main layout
+    layout.split(
+        Layout(tokens_table, name="tokens", size=1),
+        Layout(name="chat")
+    )
+    
+    return layout
 
 def chat_with_model(api_url, model_name, system_prompt=None):
     """
@@ -133,14 +121,14 @@ def chat_with_model(api_url, model_name, system_prompt=None):
     # Get available models
     available_models = get_available_models(api_url)
     if available_models:
-        print(f"{COLORS['cyan']}Available models:{COLORS['reset']}")
+        console.print("[cyan]Available models:[/cyan]")
         for model in available_models:
-            print(f"  - {model}")
+            console.print(f"  - {model}")
         
         # Check if the requested model is available
         if model_name not in available_models:
-            print(f"{COLORS['yellow']}Warning: Model '{model_name}' not found in available models.{COLORS['reset']}")
-            print(f"{COLORS['yellow']}Will try to use it anyway, but it might not work.{COLORS['reset']}")
+            console.print(f"[yellow]Warning: Model '{model_name}' not found in available models.[/yellow]")
+            console.print(f"[yellow]Will try to use it anyway, but it might not work.[/yellow]")
     
     # Initialize conversation history
     conversation = []
@@ -157,11 +145,11 @@ def chat_with_model(api_url, model_name, system_prompt=None):
     # Main chat loop
     while True:
         # Get user input
-        user_input = input(f"{COLORS['bold']}{COLORS['blue']}You: {COLORS['reset']}")
+        user_input = Prompt.ask("[bold blue]You[/bold blue]")
         
         # Check if user wants to exit
         if user_input.lower() in ["exit", "quit"]:
-            print(f"\n{COLORS['yellow']}Goodbye!{COLORS['reset']}\n")
+            console.print("\n[yellow]Goodbye![/yellow]\n")
             break
         
         # Add user message to conversation
@@ -179,7 +167,7 @@ def chat_with_model(api_url, model_name, system_prompt=None):
                 "model": model_name,
                 "messages": conversation,
                 "stream": True,
-                "max_tokens": 1000
+                "max_tokens": 32768
             }
             
             # Variables for tracking tokens per second
@@ -187,74 +175,58 @@ def chat_with_model(api_url, model_name, system_prompt=None):
             token_count = 0
             full_response = ""
             
-            # Print the tokens/s display line
-            tokens_per_second = 0
-            tokens_display = f"{COLORS['gray']}[{tokens_per_second} tokens/s]{COLORS['reset']}"
-            print(tokens_display)
+            # Create the layout
+            layout = create_chat_layout()
             
-            # Print assistant indicator
-            print(f"{COLORS['bold']}{COLORS['green']}Assistant: {COLORS['reset']}", end="", flush=True)
-            
-            # Make the API request
-            response = requests.post(
-                api_url,
-                headers=headers,
-                json=data,
-                stream=True
-            )
-            
-            if response.status_code != 200:
-                print(f"{COLORS['red']}Error: API request failed with status {response.status_code}{COLORS['reset']}")
-                continue
-            
-            # Process the streaming response
-            last_update_time = start_time
-            for line in response.iter_lines():
-                if line:
-                    line = line.decode('utf-8')
-                    if line.startswith('data: ') and line != 'data: [DONE]':
-                        try:
-                            json_data = json.loads(line[6:])
-                            if 'choices' in json_data and json_data['choices'] and 'delta' in json_data['choices'][0]:
-                                delta = json_data['choices'][0]['delta']
-                                if 'content' in delta and delta['content']:
-                                    content = delta['content']
-                                    full_response += content
-                                    
-                                    # Print the new content
-                                    print(content, end="", flush=True)
-                                    
-                                    # Update token count
-                                    token_count += 1
-                                    
-                                    # Update tokens/s display every 0.5 seconds to avoid too much flickering
-                                    current_time = time.time()
-                                    if current_time - last_update_time >= 0.5:
-                                        elapsed_time = current_time - start_time
+            # Start the live display
+            with Live(layout, refresh_per_second=4, console=console) as live:
+                # Print assistant indicator
+                console.print("[bold green]Assistant:[/bold green] ", end="")
+                
+                # Make the API request
+                response = requests.post(
+                    api_url,
+                    headers=headers,
+                    json=data,
+                    stream=True
+                )
+                
+                if response.status_code != 200:
+                    console.print(f"[bold red]Error: API request failed with status {response.status_code}[/bold red]")
+                    continue
+                
+                # Process the streaming response
+                for line in response.iter_lines():
+                    if line:
+                        line = line.decode('utf-8')
+                        if line.startswith('data: ') and line != 'data: [DONE]':
+                            try:
+                                json_data = json.loads(line[6:])
+                                if 'choices' in json_data and json_data['choices'] and 'delta' in json_data['choices'][0]:
+                                    delta = json_data['choices'][0]['delta']
+                                    if 'content' in delta and delta['content']:
+                                        content = delta['content']
+                                        full_response += content
+                                        
+                                        # Print the new content
+                                        console.print(content, end="", highlight=False)
+                                        
+                                        # Update token count
+                                        token_count += 1
+                                        
+                                        # Update tokens/s display
+                                        elapsed_time = time.time() - start_time
                                         tokens_per_second = int(token_count / elapsed_time) if elapsed_time > 0 else 0
                                         
-                                        # Move cursor up to the tokens/s line
-                                        sys.stdout.write(f"\r\033[2A")  # Move up 2 lines and to beginning of line
-                                        
-                                        # Clear the line and update tokens/s
-                                        term_width = get_terminal_width()
-                                        tokens_display = f"{COLORS['gray']}[{tokens_per_second} tokens/s]{COLORS['reset']}"
-                                        padding = term_width - len(tokens_display) + len(COLORS['gray']) + len(COLORS['reset'])
-                                        padding = max(0, padding)  # Ensure padding is not negative
-                                        
-                                        sys.stdout.write(f"{' ' * padding}{tokens_display}\n\n")  # Add newlines to go back down
-                                        
-                                        # Move back to the end of the current response
-                                        sys.stdout.write(f"\033[1A")  # Move up 1 line
-                                        sys.stdout.write(f"\r{COLORS['bold']}{COLORS['green']}Assistant: {COLORS['reset']}{full_response}")
-                                        sys.stdout.flush()
-                                        
-                                        last_update_time = current_time
-                        except json.JSONDecodeError:
-                            pass
+                                        # Update the tokens/s display
+                                        tokens_table = Table.grid(padding=0)
+                                        tokens_table.add_row(Text(f"{tokens_per_second} tokens/s", style="dim"))
+                                        layout["tokens"].update(tokens_table)
+                            except json.JSONDecodeError:
+                                pass
             
             # Add a newline after the response
-            print("\n")
+            console.print()
             
             # Add assistant message to conversation
             conversation.append({
@@ -265,12 +237,12 @@ def chat_with_model(api_url, model_name, system_prompt=None):
             # Final tokens per second calculation
             elapsed_time = time.time() - start_time
             tokens_per_second = int(token_count / elapsed_time) if elapsed_time > 0 else 0
-            print(f"{COLORS['gray']}Generated {token_count} tokens in {elapsed_time:.2f}s ({tokens_per_second} tokens/s){COLORS['reset']}\n")
+            console.print(f"[dim]Generated {token_count} tokens in {elapsed_time:.2f}s ({tokens_per_second} tokens/s)[/dim]\n")
             
         except requests.exceptions.ConnectionError:
-            print(f"\n{COLORS['red']}Error: Could not connect to the API server. Make sure it's running.{COLORS['reset']}\n")
+            console.print("\n[bold red]Error: Could not connect to the API server. Make sure it's running.[/bold red]\n")
         except Exception as e:
-            print(f"\n{COLORS['red']}Error: {str(e)}{COLORS['reset']}\n")
+            console.print(f"\n[bold red]Error: {str(e)}[/bold red]\n")
 
 def main():
     """Main function."""
@@ -291,7 +263,7 @@ def main():
     try:
         chat_with_model(args.api, args.model, args.system)
     except KeyboardInterrupt:
-        print(f"\n\n{COLORS['yellow']}Chat session ended by user.{COLORS['reset']}\n")
+        console.print(f"\n\n[yellow]Chat session ended by user.[/yellow]\n")
 
 if __name__ == "__main__":
     main() 

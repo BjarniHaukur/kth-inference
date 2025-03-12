@@ -27,6 +27,7 @@ chmod +x start.sh
 
 This will:
 - Install uv package manager if not present
+- Install required packages (requests, rich) if not present
 - Start the vLLM server with the specified model
 - The server will run in the foreground (press Ctrl+C to stop)
 
@@ -75,7 +76,7 @@ python chat.py --api http://localhost:8000/v1/chat/completions --model Qwen/QwQ-
 
 ## Features
 
-- Simple command-line interface
+- Beautiful command-line interface using the Rich library
 - Colorful output for better readability
 - Real-time token generation speed display
 - Streaming responses for a more interactive experience
