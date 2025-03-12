@@ -1,6 +1,6 @@
 # Simple CLI for fast inference on a single H100
 
-Perfect for use on KTH's DGX H100 since it mostly sits idle ¯\_(ツ)_/¯
+Perfect for use on KTH's DGX H100 since it mostly sits idle ¯\\_(ツ)_/¯
 
 ## Quick Start
 
@@ -16,15 +16,27 @@ uv run chat.py
 
 ## Configuration
 
+### Chat Interface
+
 You can customize the chat interface with these parameters:
 
 ```bash
-# Use a different model
-uv run chat.py --model mistralai/Mistral-7B-Instruct-v0.2
-
 # Set a custom system prompt
 uv run chat.py --system "You are a Python programming expert"
 ```
+
+### Model Configuration
+
+You can specify a different model when starting the server:
+
+```bash
+# Use a different model
+sh serve.sh Qwen/Qwen2.5-32B-Instruct-AWQ
+```
+
+The default model is `Qwen/QwQ-32B-AWQ`.
+
+> **Warning**: The server script is configured for AWQ models with Marlin quantization. If you want to use a non-AWQ model, you'll need to modify the `serve.sh` script to remove or change the `--quantization awq_marlin` parameter.
 
 ## Usage
 
