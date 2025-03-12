@@ -6,7 +6,7 @@ A minimal command-line chat interface for interacting with LLMs using vLLM.
 
 1. Start the vLLM server:
 ```bash
-sh start.sh
+sh serve.sh
 ```
 
 2. In a separate terminal, start the chat interface:
@@ -30,23 +30,24 @@ uv run chat.py --system "You are a Python programming expert"
 
 - **Beautiful tokens/s display** with visual indicators and progress bar
 - Dynamic speed indicators (🚀 for very fast, ⚡ for fast, etc.)
-- Multi-line input support with Ctrl+Enter to send
+- Multi-line input support with keyboard shortcuts to send
 - Scrollable conversation history
 - Real-time streaming responses
 
 ## Usage
 
 - Type your message and press Enter for new lines
-- Press Ctrl+Enter to send the message
+- Press Ctrl+J or Ctrl+M to send the message
 - Supports pasting multi-line text
 - Use chat commands (see below) for additional functionality
 
 ## Performance Notes
 
-For Qwen/QwQ-32B, these are the observed generation speeds:
+For Qwen/QwQ-32B, these are the observed generation speeds, each subsequent item includes the changes of the ones above:
 
 - AWQ: ~38 tokens/s
-- AWQ-Marlin: ~76.8 tokens/s (recommended)
+- AWQ-Marlin instead: ~76.8 tokens/s (recommended)
+- --enforce-eager: 
 
 ## Chat Commands
 

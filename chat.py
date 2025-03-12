@@ -44,7 +44,7 @@ def print_header(model_name):
     ))
     console.print(
         "[dim]- Type your message and press Enter for new lines\n"
-        "- Press [bold]Ctrl+Enter[/bold] to send your message\n"
+        "- Press [bold]Ctrl+J[/bold] or [bold]Ctrl+M[/bold] to send your message\n"
         "- Type 'exit' to quit, 'clear' to reset conversation\n"
         "- Type 'help' for more commands[/dim]"
     )
@@ -276,9 +276,19 @@ class MultilinePrompt(PromptBase):
             """Add newline on regular enter."""
             event.current_buffer.insert_text('\n')
         
-        @self.kb.add('c-enter')  # Ctrl+Enter
+        @self.kb.add('c-j', eager=True)  # Ctrl+J (equivalent to Ctrl+Enter)
         def _(event):
-            """Submit on Ctrl+Enter."""
+            """Submit on Ctrl+J (which is equivalent to Ctrl+Enter on most terminals)."""
+            if event.is_repeat:
+                # Only handle the first press
+                return
+            event.current_buffer.validate_and_handle()
+            
+        @self.kb.add('c-m', eager=True)  # Additional binding for Ctrl+M as fallback
+        def _(event):
+            """Submit on Ctrl+M (another alternative that might work for Ctrl+Enter)."""
+            if event.is_repeat:
+                return
             event.current_buffer.validate_and_handle()
     
     def render_text(self) -> Text:
