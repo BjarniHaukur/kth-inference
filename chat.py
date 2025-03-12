@@ -21,9 +21,6 @@ from rich.layout import Layout
 from rich.prompt import PromptBase, Prompt
 from rich.console import Console, Group
 from rich.progress import Progress, SpinnerColumn, TextColumn
-from prompt_toolkit import PromptSession
-from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.keys import Keys
 
 
 # Create console
@@ -43,8 +40,7 @@ def print_header(model_name):
         border_style="cyan"
     ))
     console.print(
-        "[dim]- Type your message and press Enter for new lines\n"
-        "- Press [bold]Ctrl+J[/bold] or [bold]Ctrl+M[/bold] to send your message\n"
+        "[dim]- Type your message and press Enter to send\n"
         "- Type 'exit' to quit, 'clear' to reset conversation\n"
         "- Type 'help' for more commands[/dim]"
     )
@@ -264,54 +260,15 @@ class StatsBar:
             )
 
 class MultilinePrompt(PromptBase):
-    """A prompt that supports multi-line input with Ctrl+Enter to submit."""
+    """Legacy prompt class kept for compatibility."""
     
     def __init__(self):
         super().__init__()
-        self.session = PromptSession()
-        self.kb = KeyBindings()
-        
-        # Make Enter insert a newline rather than submitting
-        @self.kb.add('enter')
-        def _(event):
-            """Add newline on regular enter."""
-            event.current_buffer.insert_text('\n')
-        
-        # Use Ctrl+J or Ctrl+Enter to submit
-        @self.kb.add('c-j', eager=True)  # Ctrl+J (equivalent to Ctrl+Enter)
-        def _(event):
-            """Submit on Ctrl+J (which is equivalent to Ctrl+Enter on most terminals)."""
-            if event.is_repeat:
-                # Only handle the first press
-                return
-            event.current_buffer.validate_and_handle()
-            
-        # Additional binding for Ctrl+M as fallback
-        @self.kb.add('c-m', eager=True)
-        def _(event):
-            """Submit on Ctrl+M (another alternative that might work for Ctrl+Enter)."""
-            if event.is_repeat:
-                return
-            event.current_buffer.validate_and_handle()
-    
-    def render_text(self) -> Text:
-        """Render the prompt text."""
-        return Text("[bold blue]You: [/bold blue]")
     
     def get_input(self) -> str:
         """Get input from the user."""
-        # Create a temporary console to clear the input area
-        temp_console = Console()
-        term_width = shutil.get_terminal_size().columns
-        temp_console.print("\n" * 3)  # Create some space at the bottom
-        
-        # Use prompt_toolkit for input, which handles proper display
-        text = self.session.prompt(
-            self.render_text().plain,
-            key_bindings=self.kb,
-            multiline=True
-        )
-        return text.strip()
+        # This method is no longer used - we use Rich's Prompt directly instead
+        return Prompt.ask("[bold blue]You[/bold blue]")
 
 class ChatInterface:
     """Enhanced chat interface with scrollable conversation history and prominent tokens/s display."""
@@ -740,14 +697,13 @@ class ChatInterface:
         
         print_header(self.model_name)
         console.print("[dim italic]Watch the tokens/s display for real-time generation speed![/dim italic]")
-        console.print("[dim]Type your message below. Press [bold]Ctrl+J[/bold] to send.[/dim]")
         console.print()
         
         # Create the layout
         layout = self.create_layout()
         
-        # Main chat loop with dedicated input handling
-        with Live(layout, refresh_per_second=10, console=console, auto_refresh=False, screen=True) as live:
+        # Main chat loop with alternate display/input approach
+        with Live(layout, refresh_per_second=10, console=console, auto_refresh=False) as live:
             while True:
                 # Update terminal size and refresh the display
                 self.terminal_size = shutil.get_terminal_size()
@@ -755,16 +711,21 @@ class ChatInterface:
                 self.update_stats_bar(layout)
                 live.refresh()
                 
-                # Suspend the Live display to get input
-                with live.suspend():
-                    console.print()  # Add some spacing
-                    console.print("[bold blue]Your message (Ctrl+J to send):[/bold blue]")
-                    try:
-                        # Get user input with multi-line support
-                        user_input = self.prompt.get_input()
-                    except KeyboardInterrupt:
-                        console.print("[yellow]Chat session ended.[/yellow]")
-                        return
+                # Temporarily stop the live display
+                live.stop()
+                
+                # Get user input
+                console.print()  # Add spacing
+                console.print("[bold blue]Your message:[/bold blue]")
+                try:
+                    # Get user input
+                    user_input = Prompt.ask(" ")
+                except KeyboardInterrupt:
+                    console.print("[yellow]Chat session ended.[/yellow]")
+                    return
+                
+                # Restart the live display
+                live.start()
                 
                 if not user_input:
                     continue
