@@ -9,6 +9,7 @@ import time
 import requests
 import sys
 import os
+import shutil
 from datetime import datetime
 
 # ANSI color codes
@@ -24,9 +25,22 @@ COLORS = {
     "gray": "\033[90m",
 }
 
+# ANSI cursor movement codes
+CURSOR = {
+    "up": "\033[A",
+    "down": "\033[B",
+    "right": "\033[C",
+    "left": "\033[D",
+    "save": "\033[s",
+    "restore": "\033[u",
+    "clear_line": "\033[K",
+    "clear_screen": "\033[2J",
+    "home": "\033[H",
+}
+
 def clear_line():
     """Clear the current line in the terminal."""
-    sys.stdout.write("\033[K")
+    sys.stdout.write(CURSOR["clear_line"])
     sys.stdout.flush()
 
 def print_header(model_name):
@@ -96,6 +110,13 @@ def wait_for_server(api_base_url, max_retries=10, retry_delay=2):
     print(f"{COLORS['yellow']}Make sure the vLLM server is running with: ./start.sh{COLORS['reset']}")
     return False
 
+def get_terminal_width():
+    """Get the width of the terminal."""
+    try:
+        return shutil.get_terminal_size().columns
+    except:
+        return 80  # Default width if we can't determine it
+
 def chat_with_model(api_url, model_name, system_prompt=None):
     """
     Start a chat session with the model.
@@ -149,9 +170,6 @@ def chat_with_model(api_url, model_name, system_prompt=None):
             "content": user_input
         })
         
-        # Print assistant indicator
-        print(f"{COLORS['bold']}{COLORS['green']}Assistant: {COLORS['reset']}", end="", flush=True)
-        
         try:
             # Prepare the API request
             headers = {
@@ -163,6 +181,19 @@ def chat_with_model(api_url, model_name, system_prompt=None):
                 "stream": True,
                 "max_tokens": 1000
             }
+            
+            # Variables for tracking tokens per second
+            start_time = time.time()
+            token_count = 0
+            full_response = ""
+            
+            # Print the tokens/s display line
+            tokens_per_second = 0
+            tokens_display = f"{COLORS['gray']}[{tokens_per_second} tokens/s]{COLORS['reset']}"
+            print(tokens_display)
+            
+            # Print assistant indicator
+            print(f"{COLORS['bold']}{COLORS['green']}Assistant: {COLORS['reset']}", end="", flush=True)
             
             # Make the API request
             response = requests.post(
@@ -176,12 +207,8 @@ def chat_with_model(api_url, model_name, system_prompt=None):
                 print(f"{COLORS['red']}Error: API request failed with status {response.status_code}{COLORS['reset']}")
                 continue
             
-            # Variables for tracking tokens per second
-            start_time = time.time()
-            token_count = 0
-            full_response = ""
-            
             # Process the streaming response
+            last_update_time = start_time
             for line in response.iter_lines():
                 if line:
                     line = line.decode('utf-8')
@@ -193,16 +220,36 @@ def chat_with_model(api_url, model_name, system_prompt=None):
                                 if 'content' in delta and delta['content']:
                                     content = delta['content']
                                     full_response += content
+                                    
+                                    # Print the new content
                                     print(content, end="", flush=True)
                                     
-                                    # Update token count and calculate tokens per second
+                                    # Update token count
                                     token_count += 1
-                                    elapsed_time = time.time() - start_time
-                                    tokens_per_second = int(token_count / elapsed_time) if elapsed_time > 0 else 0
                                     
-                                    # Update the tokens/s display (on the same line)
-                                    sys.stdout.write(f"\r{COLORS['gray']}[{tokens_per_second} tokens/s]{COLORS['reset']}")
-                                    sys.stdout.flush()
+                                    # Update tokens/s display every 0.5 seconds to avoid too much flickering
+                                    current_time = time.time()
+                                    if current_time - last_update_time >= 0.5:
+                                        elapsed_time = current_time - start_time
+                                        tokens_per_second = int(token_count / elapsed_time) if elapsed_time > 0 else 0
+                                        
+                                        # Move cursor up to the tokens/s line
+                                        sys.stdout.write(f"\r\033[2A")  # Move up 2 lines and to beginning of line
+                                        
+                                        # Clear the line and update tokens/s
+                                        term_width = get_terminal_width()
+                                        tokens_display = f"{COLORS['gray']}[{tokens_per_second} tokens/s]{COLORS['reset']}"
+                                        padding = term_width - len(tokens_display) + len(COLORS['gray']) + len(COLORS['reset'])
+                                        padding = max(0, padding)  # Ensure padding is not negative
+                                        
+                                        sys.stdout.write(f"{' ' * padding}{tokens_display}\n\n")  # Add newlines to go back down
+                                        
+                                        # Move back to the end of the current response
+                                        sys.stdout.write(f"\033[1A")  # Move up 1 line
+                                        sys.stdout.write(f"\r{COLORS['bold']}{COLORS['green']}Assistant: {COLORS['reset']}{full_response}")
+                                        sys.stdout.flush()
+                                        
+                                        last_update_time = current_time
                         except json.JSONDecodeError:
                             pass
             
