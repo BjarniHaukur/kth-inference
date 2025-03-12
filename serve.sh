@@ -21,9 +21,8 @@ echo "Starting vLLM server..."
 uv run python3 -m vllm.entrypoints.openai.api_server \
     --host 0.0.0.0 \
     --port 8000 \
-    --dtype half \
+    --dtype auto \
     --quantization awq_marlin \
-    --enforce-eager \
     --max-model-len 32768 \
     --model $MODEL_NAME
 
