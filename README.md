@@ -86,6 +86,7 @@ python chat.py --api http://localhost:8000/v1/chat/completions --model Qwen/QwQ-
 - Conversation history maintained during the session
 - Automatic detection of available models
 - Smart token management that maximizes response length
+- Optimized inference with awq_marlin quantization
 - Helpful chat commands:
   - `clear` or `reset`: Clear conversation history
   - `help` or `?`: Show available commands

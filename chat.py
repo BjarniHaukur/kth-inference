@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Simple CLI chat interface for LLMs using vLLM's OpenAI-compatible API.
+Enhanced CLI chat interface for LLMs using vLLM's OpenAI-compatible API.
+Features a scrollable conversation history and prominent tokens/s display.
 """
 
 import os
@@ -8,16 +9,26 @@ import json
 import time
 import requests
 import argparse
+import shutil
+from datetime import datetime
 
-from rich.console import Console
+from rich.console import Console, Group
 from rich.live import Live
 from rich.text import Text
 from rich.panel import Panel
 from rich.align import Align
 from rich.layout import Layout
 from rich.prompt import Prompt
-from rich.box import ROUNDED
+from rich.box import ROUNDED, HEAVY
 from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.style import Style
+from rich.syntax import Syntax
+from rich.table import Table
+from rich.markdown import Markdown
+from rich.console import RenderableType
+from rich import box
+from rich.padding import Padding
+from rich.columns import Columns
 
 # Create console
 console = Console()
@@ -110,27 +121,187 @@ def wait_for_server(api_base_url, max_retries=10, retry_delay=2):
     console.print("[yellow]Make sure the vLLM server is running with: ./start.sh[/yellow]")
     return False
 
+class Message:
+    """Representation of a chat message."""
+    
+    def __init__(self, role, content="", timestamp=None):
+        self.role = role
+        self.content = content
+        self.timestamp = timestamp or datetime.now()
+    
+    def to_dict(self):
+        """Convert to dict for API calls."""
+        return {
+            "role": self.role,
+            "content": self.content
+        }
+    
+    def to_panel(self, width=None):
+        """Convert message to a Rich Panel for display."""
+        if self.role == "system":
+            return Panel(
+                self.content,
+                title="[bold blue]System[/bold blue]",
+                title_align="left",
+                border_style="blue",
+                padding=(1, 2),
+                width=width,
+                box=box.ROUNDED
+            )
+        elif self.role == "user":
+            return Panel(
+                self.content,
+                title="[bold blue]You[/bold blue]",
+                title_align="left",
+                border_style="blue",
+                padding=(1, 2),
+                width=width,
+                box=box.ROUNDED
+            )
+        elif self.role == "assistant":
+            return Panel(
+                self.content,
+                title="[bold green]Assistant[/bold green]",
+                title_align="left",
+                border_style="green",
+                padding=(1, 2),
+                width=width,
+                box=box.ROUNDED
+            )
+        else:
+            return Panel(
+                self.content,
+                title=f"[bold yellow]{self.role.capitalize()}[/bold yellow]",
+                title_align="left",
+                border_style="yellow",
+                padding=(1, 2),
+                width=width,
+                box=box.ROUNDED
+            )
+
+class StatsBar:
+    """Stats bar for displaying generation metrics prominently."""
+    
+    def __init__(self):
+        self.token_count = 0
+        self.tokens_per_second = 0
+        self.total_time = 0.0
+        self.is_generating = False
+        self.status = "Ready"
+    
+    def update(self, token_count=None, tokens_per_second=None, total_time=None, 
+               is_generating=None, status=None):
+        """Update stats with new values."""
+        if token_count is not None:
+            self.token_count = token_count
+        if tokens_per_second is not None:
+            self.tokens_per_second = tokens_per_second
+        if total_time is not None:
+            self.total_time = total_time
+        if is_generating is not None:
+            self.is_generating = is_generating
+        if status is not None:
+            self.status = status
+    
+    def to_renderable(self):
+        """Convert to a Rich renderable for display."""
+        if self.is_generating:
+            # More prominent display during generation
+            speed_style = "bold green" if self.tokens_per_second > 15 else "bold yellow"
+            
+            stats_table = Table(show_header=False, box=None, padding=0, expand=True)
+            stats_table.add_column("Status", style="bold")
+            stats_table.add_column("Tokens", style="cyan")
+            stats_table.add_column("Speed", style=speed_style)
+            stats_table.add_column("Time", style="dim")
+            
+            stats_table.add_row(
+                "⚡ GENERATING", 
+                f"{self.token_count} tokens", 
+                f"{self.tokens_per_second} tokens/s",
+                f"{self.total_time:.1f}s"
+            )
+            
+            return Panel(
+                stats_table,
+                border_style="green",
+                padding=(0, 1),
+                title="Generation Stats",
+                title_align="left"
+            )
+        else:
+            # Simple status display when idle
+            return Panel(
+                Text(self.status, style="cyan"),
+                border_style="cyan",
+                padding=(0, 1)
+            )
+
 class ChatInterface:
-    """Chat interface with a status bar for tokens/s display."""
+    """Enhanced chat interface with scrollable conversation history and prominent tokens/s display."""
     
     def __init__(self, api_url, model_name, system_prompt=None, max_context_length=32768):
         self.api_url = api_url
         self.model_name = model_name
         self.system_prompt = system_prompt
         self.max_context_length = max_context_length
-        self.conversation = []
-        self.token_count = 0
-        self.tokens_per_second = 0
+        self.messages = []
+        self.visible_messages = []
+        self.scroll_position = 0
+        self.stats = StatsBar()
         self.start_time = 0
-        self.is_generating = False
-        self.full_response = ""
+        self.total_tokens = 0
+        self.total_time = 0
+        self.current_response = ""
+        
+        # Terminal size
+        self.terminal_size = shutil.get_terminal_size()
         
         # Add system message if provided
         if system_prompt:
-            self.conversation.append({
-                "role": "system",
-                "content": system_prompt
-            })
+            self.add_message("system", system_prompt)
+    
+    def add_message(self, role, content):
+        """Add a message to the conversation."""
+        message = Message(role, content)
+        self.messages.append(message)
+        # Auto-scroll to bottom
+        self.scroll_to_bottom()
+        return message
+    
+    def scroll_to_bottom(self):
+        """Scroll to the latest message."""
+        terminal_height = self.terminal_size.lines
+        # We need to leave space for the stats bar and prompt
+        max_visible = terminal_height - 10
+        
+        if len(self.messages) > max_visible:
+            self.scroll_position = len(self.messages) - max_visible
+        else:
+            self.scroll_position = 0
+    
+    def scroll_up(self):
+        """Scroll conversation up."""
+        if self.scroll_position > 0:
+            self.scroll_position -= 1
+    
+    def scroll_down(self):
+        """Scroll conversation down."""
+        max_scroll = max(0, len(self.messages) - (self.terminal_size.lines - 10))
+        if self.scroll_position < max_scroll:
+            self.scroll_position += 1
+    
+    def get_visible_messages(self):
+        """Get the currently visible messages based on scroll position."""
+        terminal_height = self.terminal_size.lines
+        # We need to leave space for the stats bar and prompt
+        max_visible = terminal_height - 10
+        
+        if len(self.messages) <= max_visible:
+            return self.messages
+        else:
+            end_idx = min(len(self.messages), self.scroll_position + max_visible)
+            return self.messages[self.scroll_position:end_idx]
     
     def estimate_tokens_in_messages(self):
         """
@@ -138,9 +309,9 @@ class ChatInterface:
         This is a rough estimate - about 4 characters per token for English text.
         """
         total_chars = 0
-        for message in self.conversation:
+        for message in self.messages:
             # Add characters in the message content
-            total_chars += len(message.get("content", ""))
+            total_chars += len(message.content)
             # Add some overhead for the message format
             total_chars += 10  # Rough estimate for role and formatting
         
@@ -161,47 +332,263 @@ class ChatInterface:
         """Create the layout for the chat interface."""
         layout = Layout()
         
-        # Create the main layout with chat area and status bar
+        # Create the main layout with chat area, stats bar, and input area
         layout.split_column(
-            Layout(name="chat", ratio=1),
-            Layout(name="status_bar", size=1)
+            Layout(name="chat_area", ratio=8),
+            Layout(name="stats_bar", size=3),
+            Layout(name="input_area", size=1)
         )
         
-        # Initialize the status bar with a more visible style
-        layout["status_bar"].update(
+        # Initialize the chat area with an empty panel
+        layout["chat_area"].update(
             Panel(
-                Align.right(Text("Ready", style="cyan")),
+                Text("Welcome to the chat! Type your message below."),
+                title="Conversation",
                 border_style="cyan",
-                padding=(0, 1),
-                height=1
+                box=ROUNDED,
+                padding=(1, 2)
+            )
+        )
+        
+        # Initialize the stats bar
+        layout["stats_bar"].update(self.stats.to_renderable())
+        
+        # Initialize the input area with a prompt
+        layout["input_area"].update(
+            Panel(
+                Text("Type your message..."),
+                title="Input",
+                border_style="blue",
+                box=ROUNDED,
+                padding=(0, 1)
             )
         )
         
         return layout
     
-    def update_status_bar(self, layout, message=None):
-        """Update the status bar with tokens/s information."""
-        if self.is_generating:
-            elapsed_time = max(0.1, time.time() - self.start_time)
-            self.tokens_per_second = int(self.token_count / elapsed_time)
-            status_text = f"Generating: {self.token_count} tokens | {self.tokens_per_second} tokens/s"
-            style = "green"
-        elif message:
-            status_text = message
-            style = "yellow"
-        else:
-            status_text = "Ready"
-            style = "cyan"
+    def update_chat_area(self, layout):
+        """Update the chat area with current messages."""
+        visible_messages = self.get_visible_messages()
         
-        # Update the status bar with a panel for better visibility
-        layout["status_bar"].update(
+        if not visible_messages:
+            # Show a welcome message when there are no messages
+            layout["chat_area"].update(
+                Panel(
+                    Text("Welcome to the chat! Type your message below."),
+                    title="Conversation",
+                    border_style="cyan",
+                    box=ROUNDED,
+                    padding=(1, 2)
+                )
+            )
+            return
+        
+        # Get the width of the terminal for formatting
+        width = max(60, self.terminal_size.columns - 10)
+        
+        # Create panels for each message
+        message_panels = []
+        for message in visible_messages:
+            message_panels.append(message.to_panel(width=width))
+        
+        # Add scroll indicators if needed
+        scroll_info = ""
+        if self.scroll_position > 0:
+            scroll_info += "[bold yellow]↑ More messages above[/bold yellow]\n"
+        
+        max_scroll = max(0, len(self.messages) - (self.terminal_size.lines - 10))
+        if self.scroll_position < max_scroll:
+            if scroll_info:
+                scroll_info += "\n"
+            scroll_info += "[bold yellow]↓ More messages below[/bold yellow]"
+        
+        # Group all the message panels with appropriate spacing
+        messages_group = Group(*message_panels)
+        
+        # Create the final renderable with scroll indicators
+        final_renderable = Group(
+            Text(scroll_info) if scroll_info else Text(""),
+            messages_group
+        )
+        
+        # Update the chat area
+        layout["chat_area"].update(
             Panel(
-                Align.right(Text(status_text, style=style)),
+                final_renderable,
+                title=f"Conversation ({len(self.messages)} messages)",
                 border_style="cyan",
-                padding=(0, 1),
-                height=1
+                box=ROUNDED,
+                padding=(0, 1)
             )
         )
+    
+    def update_stats_bar(self, layout):
+        """Update the stats bar with current stats."""
+        layout["stats_bar"].update(self.stats.to_renderable())
+    
+    def update_input_area(self, layout, text="Type your message..."):
+        """Update the input area with current text."""
+        layout["input_area"].update(
+            Panel(
+                Text(text),
+                title="Input",
+                border_style="blue",
+                box=ROUNDED,
+                padding=(0, 1)
+            )
+        )
+    
+    def handle_user_command(self, command):
+        """Handle special user commands."""
+        command = command.lower()
+        
+        if command in ["exit", "quit"]:
+            return "exit"
+        elif command in ["clear", "reset"]:
+            # Clear conversation history except system prompt
+            if self.system_prompt:
+                self.messages = [m for m in self.messages if m.role == "system"]
+            else:
+                self.messages = []
+            self.scroll_position = 0
+            self.stats.update(status="Conversation cleared")
+            return "continue"
+        elif command in ["help", "?"]:
+            help_message = (
+                "Available commands:\n"
+                "- exit or quit: Exit the chat\n"
+                "- clear or reset: Clear conversation history\n"
+                "- help or ?: Show this help message\n"
+                "- scroll up/down: Navigate through message history"
+            )
+            self.add_message("system", help_message)
+            return "continue"
+        elif command == "scroll up":
+            self.scroll_up()
+            return "continue"
+        elif command == "scroll down":
+            self.scroll_down()
+            return "continue"
+        
+        # Not a special command
+        return None
+    
+    def generate_response(self, layout, live):
+        """Generate a response from the LLM."""
+        # Update status
+        self.stats.update(
+            token_count=0, 
+            tokens_per_second=0, 
+            total_time=0.0, 
+            is_generating=True,
+            status="Generating..."
+        )
+        self.update_stats_bar(layout)
+        live.refresh()
+        
+        # Reset counters
+        self.start_time = time.time()
+        self.current_response = ""
+        
+        # Prepare API request
+        headers = {"Content-Type": "application/json"}
+        
+        # Convert messages to API format
+        api_messages = [m.to_dict() for m in self.messages]
+        
+        # Calculate maximum available tokens
+        max_tokens = self.calculate_max_tokens()
+        
+        data = {
+            "model": self.model_name,
+            "messages": api_messages,
+            "stream": True,
+            "max_tokens": max_tokens
+        }
+        
+        try:
+            # Make the API request
+            response = requests.post(
+                self.api_url,
+                headers=headers,
+                json=data,
+                stream=True
+            )
+            
+            if response.status_code != 200:
+                error_msg = f"API request failed with status {response.status_code}"
+                self.add_message("system", f"Error: {error_msg}")
+                self.stats.update(is_generating=False, status="Error")
+                self.update_stats_bar(layout)
+                self.update_chat_area(layout)
+                live.refresh()
+                return
+            
+            # Add an empty assistant message that will be updated
+            assistant_message = self.add_message("assistant", "")
+            
+            # Process the streaming response
+            for line in response.iter_lines():
+                if not line:
+                    continue
+                
+                line = line.decode('utf-8')
+                if line.startswith('data: ') and line != 'data: [DONE]':
+                    try:
+                        json_data = json.loads(line[6:])
+                        if 'choices' in json_data and json_data['choices'] and 'delta' in json_data['choices'][0]:
+                            delta = json_data['choices'][0]['delta']
+                            if 'content' in delta and delta['content']:
+                                content = delta['content']
+                                self.current_response += content
+                                
+                                # Update the assistant message
+                                assistant_message.content = self.current_response
+                                
+                                # Update token count and stats
+                                self.stats.token_count += 1
+                                elapsed_time = max(0.1, time.time() - self.start_time)
+                                self.stats.tokens_per_second = int(self.stats.token_count / elapsed_time)
+                                self.stats.total_time = elapsed_time
+                                
+                                # Update the display every 3 tokens to reduce flicker
+                                if self.stats.token_count % 3 == 0:
+                                    self.update_stats_bar(layout)
+                                    self.update_chat_area(layout)
+                                    live.refresh()
+                    except json.JSONDecodeError:
+                        pass
+            
+            # Final update
+            assistant_message.content = self.current_response
+            self.total_tokens += self.stats.token_count
+            self.total_time += self.stats.total_time
+            
+            # Update stats to show completion
+            self.stats.update(
+                is_generating=False,
+                status=f"Generated {self.stats.token_count} tokens in {self.stats.total_time:.1f}s ({self.stats.tokens_per_second} tokens/s)"
+            )
+            
+            # Final display update
+            self.update_stats_bar(layout)
+            self.update_chat_area(layout)
+            live.refresh()
+            
+        except requests.exceptions.ConnectionError:
+            error_msg = "Could not connect to the API server. Make sure it's running."
+            self.add_message("system", f"Error: {error_msg}")
+            self.stats.update(is_generating=False, status="Connection Error")
+            self.update_stats_bar(layout)
+            self.update_chat_area(layout)
+            live.refresh()
+        except Exception as e:
+            error_msg = str(e)
+            self.add_message("system", f"Error: {error_msg}")
+            self.stats.update(is_generating=False, status="Error")
+            self.update_stats_bar(layout)
+            self.update_chat_area(layout)
+            live.refresh()
     
     def run(self):
         """Run the chat interface."""
@@ -229,141 +616,42 @@ class ChatInterface:
         # Main chat loop
         with Live(layout, refresh_per_second=10, console=console, auto_refresh=False) as live:
             while True:
-                # Update status bar
-                self.update_status_bar(layout)
+                # Update the display
+                self.terminal_size = shutil.get_terminal_size()
+                self.update_chat_area(layout)
+                self.update_stats_bar(layout)
+                self.update_input_area(layout)
                 live.refresh()
                 
-                # Get user input (without stopping the live display)
+                # Get user input
                 user_input = Prompt.ask("[bold blue]You[/bold blue]")
                 
                 # Check for special commands
-                if user_input.lower() in ["exit", "quit"]:
-                    self.update_status_bar(layout, "Goodbye!")
+                command_result = self.handle_user_command(user_input)
+                
+                if command_result == "exit":
+                    self.stats.update(status="Goodbye!")
+                    self.update_stats_bar(layout)
                     live.refresh()
                     time.sleep(1)  # Show goodbye message briefly
                     break
-                elif user_input.lower() in ["clear", "reset"]:
-                    # Clear conversation history except system prompt
-                    if self.system_prompt:
-                        self.conversation = [{"role": "system", "content": self.system_prompt}]
-                    else:
-                        self.conversation = []
-                    console.print("[yellow]Conversation history cleared.[/yellow]\n")
-                    continue
-                elif user_input.lower() in ["help", "?"]:
-                    console.print(Panel(
-                        "[cyan]Available commands:[/cyan]\n"
-                        "- [bold]exit[/bold] or [bold]quit[/bold]: Exit the chat\n"
-                        "- [bold]clear[/bold] or [bold]reset[/bold]: Clear conversation history\n"
-                        "- [bold]help[/bold] or [bold]?[/bold]: Show this help message",
-                        title="Help",
-                        border_style="cyan"
-                    ))
+                elif command_result == "continue":
                     continue
                 
-                # Add user message to conversation
-                self.conversation.append({
-                    "role": "user",
-                    "content": user_input
-                })
+                # Regular user message
+                self.add_message("user", user_input)
+                self.update_chat_area(layout)
+                live.refresh()
                 
-                try:
-                    # Reset counters
-                    self.token_count = 0
-                    self.tokens_per_second = 0
-                    self.start_time = time.time()
-                    self.is_generating = True
-                    self.full_response = ""
-                    
-                    # Update status bar to show we're generating
-                    self.update_status_bar(layout)
-                    live.refresh()
-                    
-                    # Print the assistant prompt
-                    console.print("[bold green]Assistant:[/bold green] ", end="")
-                    
-                    # Prepare the API request
-                    headers = {
-                        "Content-Type": "application/json"
-                    }
-                    
-                    # Calculate maximum available tokens for completion
-                    available_tokens = self.calculate_max_tokens()
-                    console.print(f"[dim](Using up to {available_tokens} tokens for response)[/dim]", end=" ")
-                    
-                    data = {
-                        "model": self.model_name,
-                        "messages": self.conversation,
-                        "stream": True,
-                        "max_tokens": available_tokens
-                    }
-                    
-                    # Make the API request
-                    response = requests.post(
-                        self.api_url,
-                        headers=headers,
-                        json=data,
-                        stream=True
-                    )
-                    
-                    if response.status_code != 200:
-                        console.print(f"[bold red]Error: API request failed with status {response.status_code}[/bold red]")
-                        continue
-                    
-                    # Process the streaming response
-                    for line in response.iter_lines():
-                        if line:
-                            line = line.decode('utf-8')
-                            if line.startswith('data: ') and line != 'data: [DONE]':
-                                try:
-                                    json_data = json.loads(line[6:])
-                                    if 'choices' in json_data and json_data['choices'] and 'delta' in json_data['choices'][0]:
-                                        delta = json_data['choices'][0]['delta']
-                                        if 'content' in delta and delta['content']:
-                                            content = delta['content']
-                                            self.full_response += content
-                                            
-                                            # Print the new content
-                                            console.print(content, end="", highlight=False)
-                                            
-                                            # Update token count
-                                            self.token_count += 1
-                                            
-                                            # Update status bar every 5 tokens to reduce flicker
-                                            if self.token_count % 5 == 0:
-                                                self.update_status_bar(layout)
-                                                live.refresh()
-                                except json.JSONDecodeError:
-                                    pass
-                    
-                    # Add a newline after the response
-                    console.print()
-                    
-                    # Add assistant message to conversation
-                    self.conversation.append({
-                        "role": "assistant",
-                        "content": self.full_response
-                    })
-                    
-                    # Final tokens per second calculation
-                    self.is_generating = False
-                    elapsed_time = time.time() - self.start_time
-                    self.tokens_per_second = int(self.token_count / elapsed_time) if elapsed_time > 0 else 0
-                    
-                    # Show final generation stats
-                    console.print(f"[dim]Generated {self.token_count} tokens in {elapsed_time:.2f}s ({self.tokens_per_second} tokens/s)[/dim]\n")
-                    
-                except requests.exceptions.ConnectionError:
-                    console.print("\n[bold red]Error: Could not connect to the API server. Make sure it's running.[/bold red]\n")
-                except Exception as e:
-                    console.print(f"\n[bold red]Error: {str(e)}[/bold red]\n")
+                # Generate response
+                self.generate_response(layout, live)
 
 def main():
     """Main function."""
     # Get default model from environment or use QwQ-32B
     default_model = os.environ.get("VLLM_MODEL", "Qwen/QwQ-32B-AWQ")
     
-    parser = argparse.ArgumentParser(description="Simple CLI chat interface for LLMs")
+    parser = argparse.ArgumentParser(description="Enhanced CLI chat interface for LLMs")
     parser.add_argument("--api", type=str, default="http://localhost:8000/v1/chat/completions",
                         help="URL of the OpenAI-compatible API (default: http://localhost:8000/v1/chat/completions)")
     parser.add_argument("--model", type=str, default=default_model,

@@ -22,7 +22,7 @@ uv run python3 -m vllm.entrypoints.openai.api_server \
     --host 0.0.0.0 \
     --port 8000 \
     --dtype half \
-    --quantization awq \
+    --quantization awq_marlin \
     --max-model-len 32768 \
     --model $MODEL_NAME
 
