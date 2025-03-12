@@ -108,10 +108,11 @@ def wait_for_server(api_base_url, max_retries=10, retry_delay=2):
 class ChatInterface:
     """Chat interface with a status bar for tokens/s display."""
     
-    def __init__(self, api_url, model_name, system_prompt=None):
+    def __init__(self, api_url, model_name, system_prompt=None, max_tokens=4096):
         self.api_url = api_url
         self.model_name = model_name
         self.system_prompt = system_prompt
+        self.max_tokens = max_tokens
         self.conversation = []
         self.token_count = 0
         self.tokens_per_second = 0
@@ -231,7 +232,7 @@ class ChatInterface:
                         "model": self.model_name,
                         "messages": self.conversation,
                         "stream": True,
-                        "max_tokens": 32768
+                        "max_tokens": self.max_tokens
                     }
                     
                     # Make the API request
@@ -317,12 +318,14 @@ def main():
     parser.add_argument("--system", type=str, 
                         default="You are a helpful, respectful and honest assistant. Always answer as helpfully as possible.",
                         help="System prompt to set the behavior of the assistant")
+    parser.add_argument("--max-tokens", type=int, default=4096,
+                        help="Maximum number of tokens to generate (default: 4096)")
     
     args = parser.parse_args()
     
     try:
         # Create and run the chat interface
-        chat_interface = ChatInterface(args.api, args.model, args.system)
+        chat_interface = ChatInterface(args.api, args.model, args.system, args.max_tokens)
         chat_interface.run()
     except KeyboardInterrupt:
         console.print(f"\n\n[yellow]Chat session ended by user.[/yellow]\n")

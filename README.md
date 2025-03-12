@@ -47,6 +47,9 @@ chmod +x chat.py
 
 # Or specify a custom system prompt
 ./chat.py --system "You are a helpful AI assistant that specializes in Python programming."
+
+# Control the maximum number of tokens to generate
+./chat.py --max-tokens 1024
 ```
 
 The chat interface will:
