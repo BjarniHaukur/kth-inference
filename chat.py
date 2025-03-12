@@ -271,11 +271,13 @@ class MultilinePrompt(PromptBase):
         self.session = PromptSession()
         self.kb = KeyBindings()
         
-        @self.kb.add('c-j', 'c-m')  # Enter key
+        # Make Enter insert a newline rather than submitting
+        @self.kb.add('enter')
         def _(event):
             """Add newline on regular enter."""
             event.current_buffer.insert_text('\n')
         
+        # Use Ctrl+J or Ctrl+Enter to submit
         @self.kb.add('c-j', eager=True)  # Ctrl+J (equivalent to Ctrl+Enter)
         def _(event):
             """Submit on Ctrl+J (which is equivalent to Ctrl+Enter on most terminals)."""
@@ -284,7 +286,8 @@ class MultilinePrompt(PromptBase):
                 return
             event.current_buffer.validate_and_handle()
             
-        @self.kb.add('c-m', eager=True)  # Additional binding for Ctrl+M as fallback
+        # Additional binding for Ctrl+M as fallback
+        @self.kb.add('c-m', eager=True)
         def _(event):
             """Submit on Ctrl+M (another alternative that might work for Ctrl+Enter)."""
             if event.is_repeat:
@@ -293,10 +296,16 @@ class MultilinePrompt(PromptBase):
     
     def render_text(self) -> Text:
         """Render the prompt text."""
-        return Text("[bold blue]You[/bold blue]")
+        return Text("[bold blue]You: [/bold blue]")
     
     def get_input(self) -> str:
         """Get input from the user."""
+        # Create a temporary console to clear the input area
+        temp_console = Console()
+        term_width = shutil.get_terminal_size().columns
+        temp_console.print("\n" * 3)  # Create some space at the bottom
+        
+        # Use prompt_toolkit for input, which handles proper display
         text = self.session.prompt(
             self.render_text().plain,
             key_bindings=self.kb,
@@ -465,17 +474,17 @@ class ChatInterface:
         """Create the layout for the chat interface."""
         layout = Layout()
         
-        # Create the main layout - more space for chat, fixed space for stats and input
+        # Create a simpler layout with just chat area and stats bar
+        # We'll handle input separately
         layout.split_column(
-            Layout(name="chat_area", ratio=80),
-            Layout(name="stats_bar", size=3),
-            Layout(name="input_area", size=3)  # Increased size for input area
+            Layout(name="chat_area", ratio=85),
+            Layout(name="stats_bar", size=3)
         )
         
         # Initialize the chat area with an empty panel
         layout["chat_area"].update(
             Panel(
-                Text("Welcome to the chat! Type your message below."),
+                Text("Welcome to the chat! Type your message when prompted."),
                 title="Conversation",
                 border_style="cyan",
                 box=ROUNDED,
@@ -485,17 +494,6 @@ class ChatInterface:
         
         # Initialize the stats bar
         layout["stats_bar"].update(self.stats.to_renderable())
-        
-        # Initialize the input area with a prompt
-        layout["input_area"].update(
-            Panel(
-                Text("Type your message..."),
-                title="Input (Ctrl+J to send)",
-                border_style="blue",
-                box=ROUNDED,
-                padding=(0, 1)
-            )
-        )
         
         return layout
     
@@ -563,16 +561,9 @@ class ChatInterface:
         layout["stats_bar"].update(self.stats.to_renderable())
     
     def update_input_area(self, layout, text="Type your message... (Ctrl+J to send)"):
-        """Update the input area with current text."""
-        layout["input_area"].update(
-            Panel(
-                Text(text),
-                title="Input (Ctrl+J to send)",
-                border_style="blue",
-                box=ROUNDED,
-                padding=(0, 1)
-            )
-        )
+        """Legacy method kept for compatibility."""
+        # This method is no longer used as we're handling input differently
+        pass
     
     def handle_user_command(self, command):
         """Handle special user commands."""
@@ -749,30 +740,31 @@ class ChatInterface:
         
         print_header(self.model_name)
         console.print("[dim italic]Watch the tokens/s display for real-time generation speed![/dim italic]")
+        console.print("[dim]Type your message below. Press [bold]Ctrl+J[/bold] to send.[/dim]")
         console.print()
         
         # Create the layout
         layout = self.create_layout()
         
-        # Main chat loop
-        with Live(layout, refresh_per_second=10, console=console, auto_refresh=False) as live:
+        # Main chat loop with dedicated input handling
+        with Live(layout, refresh_per_second=10, console=console, auto_refresh=False, screen=True) as live:
             while True:
                 # Update terminal size and refresh the display
                 self.terminal_size = shutil.get_terminal_size()
                 self.update_chat_area(layout)
                 self.update_stats_bar(layout)
-                self.update_input_area(layout)
                 live.refresh()
                 
-                try:
-                    # Get user input with multi-line support
-                    user_input = self.prompt.get_input()
-                except KeyboardInterrupt:
-                    self.stats.update(status="Goodbye!")
-                    self.update_stats_bar(layout)
-                    live.refresh()
-                    time.sleep(1)
-                    break
+                # Suspend the Live display to get input
+                with live.suspend():
+                    console.print()  # Add some spacing
+                    console.print("[bold blue]Your message (Ctrl+J to send):[/bold blue]")
+                    try:
+                        # Get user input with multi-line support
+                        user_input = self.prompt.get_input()
+                    except KeyboardInterrupt:
+                        console.print("[yellow]Chat session ended.[/yellow]")
+                        return
                 
                 if not user_input:
                     continue
@@ -792,6 +784,7 @@ class ChatInterface:
                 # Regular user message
                 self.add_message("user", user_input)
                 self.update_chat_area(layout)
+                self.update_stats_bar(layout)
                 live.refresh()
                 
                 # Generate response
