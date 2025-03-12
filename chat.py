@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Simple CLI chat interface for QwQ-32B using vLLM's OpenAI-compatible API.
+Simple CLI chat interface for LLMs using vLLM's OpenAI-compatible API.
 """
 
 import argparse
@@ -8,6 +8,7 @@ import json
 import time
 import requests
 import sys
+import os
 from datetime import datetime
 
 # ANSI color codes
@@ -28,19 +29,98 @@ def clear_line():
     sys.stdout.write("\033[K")
     sys.stdout.flush()
 
-def print_header():
+def print_header(model_name):
     """Print a nice header for the chat interface."""
-    print(f"\n{COLORS['bold']}{COLORS['cyan']}=== QwQ-32B Chat Interface ==={COLORS['reset']}")
+    # Extract just the model name without the organization
+    display_name = model_name.split('/')[-1] if '/' in model_name else model_name
+    print(f"\n{COLORS['bold']}{COLORS['cyan']}=== {display_name} Chat Interface ==={COLORS['reset']}")
     print(f"{COLORS['gray']}Type 'exit' or 'quit' to end the conversation{COLORS['reset']}\n")
 
-def chat_with_model(api_url, system_prompt=None):
+def get_available_models(api_base_url):
+    """
+    Get the list of available models from the API.
+    
+    Args:
+        api_base_url: Base URL of the OpenAI-compatible API
+    
+    Returns:
+        List of available model IDs, or None if the request failed
+    """
+    try:
+        # Extract the base URL (without the /v1/chat/completions part)
+        base_url = api_base_url.split('/v1/')[0]
+        models_url = f"{base_url}/v1/models"
+        
+        response = requests.get(models_url)
+        if response.status_code == 200:
+            models_data = response.json()
+            if 'data' in models_data:
+                return [model['id'] for model in models_data['data']]
+        return None
+    except Exception as e:
+        print(f"{COLORS['red']}Error fetching available models: {str(e)}{COLORS['reset']}")
+        return None
+
+def wait_for_server(api_base_url, max_retries=10, retry_delay=2):
+    """
+    Wait for the server to become available.
+    
+    Args:
+        api_base_url: Base URL of the OpenAI-compatible API
+        max_retries: Maximum number of retries
+        retry_delay: Delay between retries in seconds
+    
+    Returns:
+        True if the server is available, False otherwise
+    """
+    print(f"{COLORS['yellow']}Checking if vLLM server is running...{COLORS['reset']}")
+    
+    for i in range(max_retries):
+        try:
+            # Extract the base URL (without the /v1/chat/completions part)
+            base_url = api_base_url.split('/v1/')[0]
+            models_url = f"{base_url}/v1/models"
+            
+            response = requests.get(models_url)
+            if response.status_code == 200:
+                print(f"{COLORS['green']}Server is running!{COLORS['reset']}")
+                return True
+            
+            print(f"{COLORS['yellow']}Waiting for server to start (attempt {i+1}/{max_retries})...{COLORS['reset']}")
+            time.sleep(retry_delay)
+        except requests.exceptions.ConnectionError:
+            print(f"{COLORS['yellow']}Server not ready yet (attempt {i+1}/{max_retries})...{COLORS['reset']}")
+            time.sleep(retry_delay)
+    
+    print(f"{COLORS['red']}Server did not become available after {max_retries} attempts.{COLORS['reset']}")
+    print(f"{COLORS['yellow']}Make sure the vLLM server is running with: ./start.sh{COLORS['reset']}")
+    return False
+
+def chat_with_model(api_url, model_name, system_prompt=None):
     """
     Start a chat session with the model.
     
     Args:
         api_url: URL of the OpenAI-compatible API
+        model_name: Name of the model to use
         system_prompt: Optional system prompt to set the behavior of the assistant
     """
+    # Check if the server is running
+    if not wait_for_server(api_url):
+        return
+    
+    # Get available models
+    available_models = get_available_models(api_url)
+    if available_models:
+        print(f"{COLORS['cyan']}Available models:{COLORS['reset']}")
+        for model in available_models:
+            print(f"  - {model}")
+        
+        # Check if the requested model is available
+        if model_name not in available_models:
+            print(f"{COLORS['yellow']}Warning: Model '{model_name}' not found in available models.{COLORS['reset']}")
+            print(f"{COLORS['yellow']}Will try to use it anyway, but it might not work.{COLORS['reset']}")
+    
     # Initialize conversation history
     conversation = []
     
@@ -51,7 +131,7 @@ def chat_with_model(api_url, system_prompt=None):
             "content": system_prompt
         })
     
-    print_header()
+    print_header(model_name)
     
     # Main chat loop
     while True:
@@ -78,7 +158,7 @@ def chat_with_model(api_url, system_prompt=None):
                 "Content-Type": "application/json"
             }
             data = {
-                "model": "Qwen/QwQ-32B-AWQ",
+                "model": model_name,
                 "messages": conversation,
                 "stream": True,
                 "max_tokens": 1000
@@ -140,14 +220,21 @@ def chat_with_model(api_url, system_prompt=None):
             tokens_per_second = int(token_count / elapsed_time) if elapsed_time > 0 else 0
             print(f"{COLORS['gray']}Generated {token_count} tokens in {elapsed_time:.2f}s ({tokens_per_second} tokens/s){COLORS['reset']}\n")
             
+        except requests.exceptions.ConnectionError:
+            print(f"\n{COLORS['red']}Error: Could not connect to the API server. Make sure it's running.{COLORS['reset']}\n")
         except Exception as e:
             print(f"\n{COLORS['red']}Error: {str(e)}{COLORS['reset']}\n")
 
 def main():
     """Main function."""
-    parser = argparse.ArgumentParser(description="Simple CLI chat interface for QwQ-32B")
+    # Get default model from environment or use QwQ-32B
+    default_model = os.environ.get("VLLM_MODEL", "Qwen/QwQ-32B-AWQ")
+    
+    parser = argparse.ArgumentParser(description="Simple CLI chat interface for LLMs")
     parser.add_argument("--api", type=str, default="http://localhost:8000/v1/chat/completions",
                         help="URL of the OpenAI-compatible API (default: http://localhost:8000/v1/chat/completions)")
+    parser.add_argument("--model", type=str, default=default_model,
+                        help=f"Model name to use (default: {default_model})")
     parser.add_argument("--system", type=str, 
                         default="You are a helpful, respectful and honest assistant. Always answer as helpfully as possible.",
                         help="System prompt to set the behavior of the assistant")
@@ -155,7 +242,7 @@ def main():
     args = parser.parse_args()
     
     try:
-        chat_with_model(args.api, args.system)
+        chat_with_model(args.api, args.model, args.system)
     except KeyboardInterrupt:
         print(f"\n\n{COLORS['yellow']}Chat session ended by user.{COLORS['reset']}\n")
 

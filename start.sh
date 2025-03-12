@@ -1,54 +1,30 @@
 #!/bin/bash
 
-# Simple script to start the vLLM server and chat interface
+# Simple script to start the vLLM server
+# Usage: ./start.sh [model_name]
+# Default model: Qwen/QwQ-32B-AWQ
 
-# Check if Python is installed
-if ! command -v python3 &> /dev/null; then
-    echo "Error: Python 3 is required but not installed."
-    exit 1
+# Get the model name from the first argument or use the default
+MODEL_NAME=${1:-"Qwen/QwQ-32B-AWQ"}
+echo "Using model: $MODEL_NAME"
+
+# Install uv if not present
+if ! command -v uv &> /dev/null; then
+    echo "Installing uv package manager..."
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    # Add uv to PATH for this session
+    export PATH="$HOME/.cargo/bin:$PATH"
 fi
-
-# Check if required packages are installed
-echo "Checking required packages..."
-python3 -c "import requests" 2>/dev/null || { echo "Installing requests package..."; pip install requests; }
-
-# Check if vLLM is installed
-if ! python3 -c "import vllm" 2>/dev/null; then
-    echo "vLLM is not installed. Would you like to install it? (y/n)"
-    read -r install_vllm
-    if [[ $install_vllm == "y" ]]; then
-        echo "Installing vLLM..."
-        pip install vllm
-    else
-        echo "vLLM is required to run the model server."
-        exit 1
-    fi
-fi
-
-# Make chat.py executable
-chmod +x chat.py
 
 # Start the vLLM server
 echo "Starting vLLM server..."
-python3 -m vllm.entrypoints.openai.api_server \
+uv run python3 -m vllm.entrypoints.openai.api_server \
     --host 0.0.0.0 \
     --port 8000 \
     --dtype half \
     --quantization awq \
     --max-model-len 32768 \
-    --model Qwen/QwQ-32B-AWQ &
+    --model $MODEL_NAME
 
-# Store the PID of the vLLM server
-VLLM_PID=$!
-
-# Wait for the server to start
-echo "Waiting for vLLM server to initialize..."
-sleep 10
-
-# Start the chat interface
-echo "Starting chat interface..."
-./chat.py
-
-# When the chat interface is closed, stop the vLLM server
-echo "Stopping vLLM server..."
-kill $VLLM_PID 
+# The server runs in the foreground, so the script will block here
+# To stop the server, press Ctrl+C 
