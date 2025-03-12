@@ -1,4 +1,4 @@
-# Simple CLI for fast inference on a single H100
+# Simple VLLM serving for fast inference on a single H100
 
 Perfect for use on KTH's DGX H100 since it mostly sits idle ¯\\_(ツ)_/¯
 
