@@ -324,6 +324,12 @@ class ChatInterface:
         # Terminal size
         self.terminal_size = shutil.get_terminal_size()
         
+        # Track if user has manually scrolled
+        self.user_scrolled = False
+        
+        # Message height cache
+        self.message_heights = {}
+        
         # Add system message if provided
         if system_prompt:
             self.add_message("system", system_prompt)
@@ -332,43 +338,97 @@ class ChatInterface:
         """Add a message to the conversation."""
         message = Message(role, content)
         self.messages.append(message)
-        # Auto-scroll to bottom
-        self.scroll_to_bottom()
+        # Auto-scroll to bottom only if user hasn't manually scrolled
+        if not self.user_scrolled:
+            self.scroll_to_bottom()
         return message
+    
+    def estimate_message_height(self, message, width):
+        """Estimate the height of a message in terminal lines."""
+        # Check if we have a cached height for this message
+        message_key = f"{message.role}:{message.content}:{width}"
+        if message_key in self.message_heights:
+            return self.message_heights[message_key]
+        
+        # Estimate height based on content length and width
+        # Account for word wrapping by estimating chars per line
+        chars_per_line = max(40, width - 10)  # Adjust for padding and borders
+        
+        # Count newlines in the content
+        newlines = message.content.count('\n')
+        
+        # Estimate wrapped lines (content length / chars per line)
+        wrapped_lines = len(message.content) // chars_per_line
+        
+        # Total height: wrapped lines + explicit newlines + overhead for panel borders and title
+        estimated_height = wrapped_lines + newlines + 3  # +3 for panel overhead
+        
+        # Cache the result
+        self.message_heights[message_key] = estimated_height
+        return estimated_height
+    
+    def calculate_visible_messages(self):
+        """Calculate which messages should be visible based on their heights."""
+        terminal_height = self.terminal_size.lines
+        # Space available for messages (subtract space for stats bar, prompt, etc.)
+        available_height = terminal_height - 10
+        
+        # Get terminal width for message formatting
+        width = max(60, self.terminal_size.columns - 10)
+        
+        # Start from the bottom of the list if user hasn't scrolled
+        if not self.user_scrolled:
+            # Work backwards from the end of the messages
+            visible = []
+            current_height = 0
+            
+            for message in reversed(self.messages):
+                msg_height = self.estimate_message_height(message, width)
+                if current_height + msg_height <= available_height:
+                    visible.insert(0, message)
+                    current_height += msg_height
+                else:
+                    break
+            
+            return visible
+        else:
+            # Start from scroll_position
+            visible = []
+            current_height = 0
+            
+            for i in range(self.scroll_position, len(self.messages)):
+                msg_height = self.estimate_message_height(self.messages[i], width)
+                if current_height + msg_height <= available_height:
+                    visible.append(self.messages[i])
+                    current_height += msg_height
+                else:
+                    break
+            
+            return visible
     
     def scroll_to_bottom(self):
         """Scroll to the latest message."""
-        terminal_height = self.terminal_size.lines
-        # We need to leave space for the stats bar and prompt
-        max_visible = terminal_height - 10
-        
-        if len(self.messages) > max_visible:
-            self.scroll_position = len(self.messages) - max_visible
-        else:
-            self.scroll_position = 0
+        self.user_scrolled = False
+        self.scroll_position = len(self.messages)
     
     def scroll_up(self):
         """Scroll conversation up."""
         if self.scroll_position > 0:
+            self.user_scrolled = True
             self.scroll_position -= 1
     
     def scroll_down(self):
         """Scroll conversation down."""
-        max_scroll = max(0, len(self.messages) - (self.terminal_size.lines - 10))
-        if self.scroll_position < max_scroll:
+        if self.scroll_position < len(self.messages) - 1:
+            self.user_scrolled = True
             self.scroll_position += 1
+        else:
+            # If we're at the bottom, reset the user_scrolled flag
+            self.user_scrolled = False
     
     def get_visible_messages(self):
-        """Get the currently visible messages based on scroll position."""
-        terminal_height = self.terminal_size.lines
-        # We need to leave space for the stats bar and prompt
-        max_visible = terminal_height - 10
-        
-        if len(self.messages) <= max_visible:
-            return self.messages
-        else:
-            end_idx = min(len(self.messages), self.scroll_position + max_visible)
-            return self.messages[self.scroll_position:end_idx]
+        """Get the currently visible messages based on scroll position and message heights."""
+        return self.calculate_visible_messages()
     
     def estimate_tokens_in_messages(self):
         """
@@ -463,8 +523,7 @@ class ChatInterface:
         if self.scroll_position > 0:
             scroll_info += "[bold yellow]↑ More messages above[/bold yellow]\n"
         
-        max_scroll = max(0, len(self.messages) - (self.terminal_size.lines - 10))
-        if self.scroll_position < max_scroll:
+        if visible_messages and visible_messages[-1] != self.messages[-1]:
             if scroll_info:
                 scroll_info += "\n"
             scroll_info += "[bold yellow]↓ More messages below[/bold yellow]"
@@ -618,9 +677,11 @@ class ChatInterface:
                                 self.stats.tokens_per_second = int(self.stats.token_count / elapsed_time)
                                 self.stats.total_time = elapsed_time
                                 
-                                # Update the display more frequently and ensure auto-scroll
+                                # Update the display more frequently
                                 if self.stats.token_count % 2 == 0:  # Update every 2 tokens instead of 3
-                                    self.scroll_to_bottom()  # Force scroll to bottom
+                                    # Reset user_scrolled during generation to ensure we see new content
+                                    self.user_scrolled = False
+                                    self.scroll_to_bottom()
                                     self.update_stats_bar(layout)
                                     self.update_chat_area(layout)
                                     live.refresh()
@@ -639,6 +700,7 @@ class ChatInterface:
             )
             
             # Final display update with forced scroll
+            self.user_scrolled = False  # Reset user_scrolled flag after generation
             self.scroll_to_bottom()
             self.update_stats_bar(layout)
             self.update_chat_area(layout)

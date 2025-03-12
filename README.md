@@ -46,8 +46,8 @@ uv run chat.py --system "You are a Python programming expert"
 For Qwen/QwQ-32B, these are the observed generation speeds, each subsequent item includes the changes of the ones above:
 
 - AWQ: ~38 tokens/s
-- AWQ-Marlin instead: ~76.8 tokens/s (recommended)
-- --enforce-eager: 
+- AWQ-Marlin instead:  (recommended)
+- --enforce-eager: 67.4 tokens/s
 
 ## Chat Commands
 
