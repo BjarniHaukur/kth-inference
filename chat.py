@@ -430,31 +430,6 @@ class ChatInterface:
         """Get the currently visible messages based on scroll position."""
         return self.calculate_visible_messages()
     
-    def estimate_tokens_in_messages(self):
-        """
-        Estimate the number of tokens in the current conversation.
-        This is a rough estimate - about 4 characters per token for English text.
-        """
-        total_chars = 0
-        for message in self.messages:
-            # Add characters in the message content
-            total_chars += len(message.content)
-            # Add some overhead for the message format
-            total_chars += 10  # Rough estimate for role and formatting
-        
-        # Estimate tokens (4 chars per token is a rough approximation)
-        return (total_chars // 4) * 1.1  # To be safe
-    
-    def calculate_max_tokens(self):
-        """Calculate the maximum tokens available for completion based on context length."""
-        # Estimate tokens used in the conversation so far
-        tokens_used = self.estimate_tokens_in_messages()
-        
-        # Calculate available tokens (leave a small buffer)
-        available_tokens = max(1, 32768 - tokens_used - 50)
-        
-        return available_tokens
-    
     def create_layout(self):
         """Create the layout for the chat interface."""
         layout = Layout()
@@ -608,14 +583,12 @@ class ChatInterface:
         # Convert messages to API format
         api_messages = [m.to_dict() for m in self.messages]
         
-        # Calculate maximum available tokens
-        max_tokens = self.calculate_max_tokens()
         
         data = {
             "model": self.model_name,
             "messages": api_messages,
             "stream": True,
-            "max_tokens": max_tokens
+            "max_tokens": 16384
         }
         
         try:
