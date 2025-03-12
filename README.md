@@ -77,8 +77,8 @@ python chat.py --api http://localhost:8000/v1/chat/completions --model Qwen/QwQ-
 ## Features
 
 - Beautiful command-line interface using the Rich library
-- Colorful output for better readability
-- Real-time token generation speed display
+- Elegant status bar showing real-time token generation speed
+- Distraction-free chat experience with clean UI
 - Streaming responses for a more interactive experience
 - Conversation history maintained during the session
 - Automatic detection of available models
