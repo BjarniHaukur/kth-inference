@@ -43,7 +43,7 @@ def print_header(model_name):
     ))
     console.print(
         "[dim]- Press [bold]Enter[/bold] to send your message\n"
-        "- Press [bold]Shift+Enter[/bold] to add a new line\n"
+        "- Press [bold]Alt+Enter[/bold] to add a new line\n"
         "- Type 'exit' to quit, 'clear' to reset conversation\n"
         "- Type 'help' for more commands[/dim]"
     )
@@ -263,7 +263,7 @@ class StatsBar:
             )
 
 class MultilinePrompt:
-    """A prompt that supports multi-line input with Enter to submit and Shift+Enter for newlines."""
+    """A prompt that supports multi-line input with Enter to submit and Alt+Enter for newlines."""
     
     def __init__(self):
         self.session = PromptSession()
@@ -274,18 +274,13 @@ class MultilinePrompt:
         def _(event):
             event.current_buffer.validate_and_handle()
         
-        # Shift+Enter inserts a newline
-        @self.kb.add('s-enter')
+        # Alt+Enter inserts a newline
+        @self.kb.add('escape', 'enter')
         def _(event):
             event.current_buffer.insert_text('\n')
         
         # Keep Ctrl+J for compatibility
         @self.kb.add('c-j')
-        def _(event):
-            event.current_buffer.validate_and_handle()
-        
-        # Keep Esc+Enter for compatibility
-        @self.kb.add('escape', 'enter')
         def _(event):
             event.current_buffer.validate_and_handle()
     
@@ -557,7 +552,7 @@ class ChatInterface:
                 "- scroll up/down: Navigate through message history\n\n"
                 "Input controls:\n"
                 "- Press Enter to send your message\n"
-                "- Press Shift+Enter to add a new line"
+                "- Press Alt+Enter to add a new line"
             )
             self.add_message("system", help_message)
             return "continue"
@@ -624,6 +619,7 @@ class ChatInterface:
             assistant_message = self.add_message("assistant", "")
             
             # Process the streaming response
+            update_counter = 0
             for line in response.iter_lines():
                 if not line:
                     continue
@@ -647,12 +643,14 @@ class ChatInterface:
                                 self.stats.tokens_per_second = int(self.stats.token_count / elapsed_time)
                                 self.stats.total_time = elapsed_time
                                 
-        
+                                # Update the display more frequently
+                                update_counter += 1
+                                if update_counter % 1 == 0:  # Update every token for smoother scrolling
                                     # During generation, always show the latest content
-                                self.scroll_to_bottom()
-                                self.update_stats_bar(layout)
-                                self.update_chat_area(layout)
-                                live.refresh()
+                                    self.scroll_to_bottom()
+                                    self.update_stats_bar(layout)
+                                    self.update_chat_area(layout)
+                                    live.refresh()
                     except json.JSONDecodeError:
                         pass
             
@@ -726,7 +724,7 @@ class ChatInterface:
                 live.stop()
                 
                 # Get user input
-                console.print("[bold blue]Your message (Press Enter to send, Shift+Enter for new line):[/bold blue]")
+                console.print("[bold blue]Your message (Press Enter to send, Alt+Enter for new line):[/bold blue]")
                 
                 try:
                     # Use our improved MultilinePrompt
