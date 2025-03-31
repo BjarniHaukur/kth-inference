@@ -42,9 +42,8 @@ def print_header(model_name):
         border_style="cyan"
     ))
     console.print(
-        "[dim]- Type your message and press [bold]Ctrl+J[/bold] to send\n"
-        "- Or press [bold]Esc[/bold] followed by [bold]Enter[/bold] to send\n"
-        "- Enter key adds a new line for multiline messages\n"
+        "[dim]- Press [bold]Enter[/bold] to send your message\n"
+        "- Press [bold]Shift+Enter[/bold] to add a new line\n"
         "- Type 'exit' to quit, 'clear' to reset conversation\n"
         "- Type 'help' for more commands[/dim]"
     )
@@ -264,23 +263,28 @@ class StatsBar:
             )
 
 class MultilinePrompt:
-    """A prompt that supports multi-line input with Ctrl+J to submit (for compatibility)."""
+    """A prompt that supports multi-line input with Enter to submit and Shift+Enter for newlines."""
     
     def __init__(self):
         self.session = PromptSession()
         self.kb = KeyBindings()
         
-        # Enter inserts a newline
+        # Enter submits
         @self.kb.add('enter')
+        def _(event):
+            event.current_buffer.validate_and_handle()
+        
+        # Shift+Enter inserts a newline
+        @self.kb.add('s-enter')
         def _(event):
             event.current_buffer.insert_text('\n')
         
-        # Ctrl+J submits (this is available across all terminals)
+        # Keep Ctrl+J for compatibility
         @self.kb.add('c-j')
         def _(event):
             event.current_buffer.validate_and_handle()
         
-        # Esc followed by Enter as another option to submit
+        # Keep Esc+Enter for compatibility
         @self.kb.add('escape', 'enter')
         def _(event):
             event.current_buffer.validate_and_handle()
@@ -515,6 +519,10 @@ class ChatInterface:
                 padding=(0, 1)
             )
         )
+        
+        # Ensure we're always showing the latest content during generation
+        if self.stats.is_generating and not self.user_scrolled:
+            self.scroll_to_bottom()
     
     def update_stats_bar(self, layout):
         """Update the stats bar with current stats."""
@@ -546,7 +554,10 @@ class ChatInterface:
                 "- exit or quit: Exit the chat\n"
                 "- clear or reset: Clear conversation history\n"
                 "- help or ?: Show this help message\n"
-                "- scroll up/down: Navigate through message history"
+                "- scroll up/down: Navigate through message history\n\n"
+                "Input controls:\n"
+                "- Press Enter to send your message\n"
+                "- Press Shift+Enter to add a new line"
             )
             self.add_message("system", help_message)
             return "continue"
@@ -636,13 +647,12 @@ class ChatInterface:
                                 self.stats.tokens_per_second = int(self.stats.token_count / elapsed_time)
                                 self.stats.total_time = elapsed_time
                                 
-                                # Update the display more frequently
-                                if self.stats.token_count % 1 == 0:  # Update every token for smoother scrolling
+        
                                     # During generation, always show the latest content
-                                    self.scroll_to_bottom()
-                                    self.update_stats_bar(layout)
-                                    self.update_chat_area(layout)
-                                    live.refresh()
+                                self.scroll_to_bottom()
+                                self.update_stats_bar(layout)
+                                self.update_chat_area(layout)
+                                live.refresh()
                     except json.JSONDecodeError:
                         pass
             
@@ -704,7 +714,7 @@ class ChatInterface:
         layout = self.create_layout()
         
         # Main chat loop with alternate display/input approach
-        with Live(layout, refresh_per_second=10, console=console, auto_refresh=False) as live:
+        with Live(layout, refresh_per_second=20, console=console, auto_refresh=False) as live:
             while True:
                 # Update terminal size and refresh the display
                 self.terminal_size = shutil.get_terminal_size()
@@ -716,7 +726,7 @@ class ChatInterface:
                 live.stop()
                 
                 # Get user input
-                console.print("[bold blue]Your message (Ctrl+J or Esc+Enter to send):[/bold blue]")
+                console.print("[bold blue]Your message (Press Enter to send, Shift+Enter for new line):[/bold blue]")
                 
                 try:
                     # Use our improved MultilinePrompt
