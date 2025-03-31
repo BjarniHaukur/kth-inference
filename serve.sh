@@ -12,8 +12,6 @@ echo "Using model: $MODEL_NAME"
 if ! command -v uv &> /dev/null; then
     echo "Installing uv package manager..."
     curl -LsSf https://astral.sh/uv/install.sh | sh
-    # Add uv to PATH for this session
-    export PATH="$HOME/.cargo/bin:$PATH"
 fi
 
 # Start the vLLM server
